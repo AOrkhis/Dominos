@@ -161,7 +161,7 @@ const storeLabel = computed(() => {
             id="contact"
             v-model="form.contact"
             type="text"
-            placeholder="e.g. Alex — alex@store10600.ca"
+            placeholder="e.g. Alex — alex@store600.ca"
             class="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-200"
           />
         </div>
