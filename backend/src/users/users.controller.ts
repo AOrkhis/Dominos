@@ -10,28 +10,33 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '@nestjs/authentication';
-import { ADMIN_ROLES, Roles, RolesGuard } from '../auth/roles.js';
+import { ADMIN_ROLES, MANAGER_ROLES, Roles, RolesGuard } from '../auth/roles.js';
 import { User } from './user.entity.js';
 import { UsersService } from './users.service.js';
 
-/** User management is admin territory — super admins additionally manage admins. */
+/**
+ * Read/create: admins + supervisors (supervisors are scoped to their
+ * stores inside the service). Modify/delete: admins only.
+ */
 @Controller('users')
 @UseGuards(RolesGuard)
-@Roles(...ADMIN_ROLES)
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get()
-  findAll() {
-    return this.users.findAll();
+  @Roles(...MANAGER_ROLES)
+  findAll(@CurrentUser() caller: User) {
+    return this.users.findAll(caller);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.users.findOne(id);
+  @Roles(...MANAGER_ROLES)
+  findOne(@Param('id') id: string, @CurrentUser() caller: User) {
+    return this.users.findOneVisible(id, caller);
   }
 
   @Post()
+  @Roles(...MANAGER_ROLES)
   create(
     @Body()
     body: { name?: string; email?: string; password?: string; role?: string },
@@ -41,6 +46,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @Roles(...ADMIN_ROLES)
   update(
     @Param('id') id: string,
     @Body() body: { name?: string; role?: string; isActive?: boolean },
@@ -51,6 +57,7 @@ export class UsersController {
 
   @Delete(':id')
   @HttpCode(204)
+  @Roles(...ADMIN_ROLES)
   remove(@Param('id') id: string, @CurrentUser() caller: User) {
     return this.users.remove(id, caller);
   }

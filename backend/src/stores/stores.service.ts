@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { User, UserRole } from '../users/user.entity.js';
 import { Store } from './store.entity.js';
 import { STORE_SEED } from './stores-seed.data.js';
 
@@ -23,6 +24,16 @@ export class StoresService implements OnApplicationBootstrap {
 
   findAll(): Promise<Store[]> {
     return this.stores.find({ order: { id: 'ASC' } });
+  }
+
+  /** Admin roles see all stores; supervisor/user see only assigned ones. */
+  findMine(caller: User): Promise<Store[]> {
+    if (caller.role === UserRole.ADMIN || caller.role === UserRole.SUPER_ADMIN)
+      return this.findAll();
+    return this.stores.find({
+      where: { assignments: { userId: caller.id } },
+      order: { id: 'ASC' },
+    });
   }
 
   async findOne(id: number): Promise<Store> {

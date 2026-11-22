@@ -10,8 +10,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Public } from '@nestjs/authentication';
-import { ADMIN_ROLES, Roles, RolesGuard } from '../auth/roles.js';
+import { CurrentUser, Public } from '@nestjs/authentication';
+import { ADMIN_ROLES, MANAGER_ROLES, Roles, RolesGuard } from '../auth/roles.js';
+import { User } from '../users/user.entity.js';
 import { RequestsService, type RequestBody } from './requests.service.js';
 
 @Controller('requests')
@@ -25,11 +26,12 @@ export class RequestsController {
     return this.requests.create(body);
   }
 
+  /** The inbox: admins see everything, supervisors their stores only. */
   @Get()
   @UseGuards(RolesGuard)
-  @Roles(...ADMIN_ROLES)
-  findAll(@Query('status') status?: string) {
-    return this.requests.findAll(status);
+  @Roles(...MANAGER_ROLES)
+  findAll(@CurrentUser() caller: User, @Query('status') status?: string) {
+    return this.requests.findAll(status, caller);
   }
 
   @Patch(':id')

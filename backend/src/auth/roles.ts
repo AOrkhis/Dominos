@@ -13,6 +13,8 @@ export const ROLES_KEY = 'roles';
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
 
 export const ADMIN_ROLES = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
+/** Roles that manage people: admins globally, supervisors within their stores. */
+export const MANAGER_ROLES = [...ADMIN_ROLES, UserRole.SUPERVISOR];
 
 /**
  * Runs after the global authentication guard, which already put the

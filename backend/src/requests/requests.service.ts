@@ -4,9 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { MarketingRequest, RequestStatus } from './marketing-request.entity.js';
 import { Store } from '../stores/store.entity.js';
+import { StoreAssignment } from '../assignments/store-assignment.entity.js';
+import { User, UserRole } from '../users/user.entity.js';
 
 const STATUSES = Object.values(RequestStatus);
 
@@ -24,11 +26,28 @@ export class RequestsService {
     @InjectRepository(MarketingRequest)
     private readonly requests: Repository<MarketingRequest>,
     @InjectRepository(Store) private readonly stores: Repository<Store>,
+    @InjectRepository(StoreAssignment)
+    private readonly assignments: Repository<StoreAssignment>,
   ) {}
 
-  findAll(status?: string): Promise<MarketingRequest[]> {
+  /** Admins see every request; supervisors only their stores' requests. */
+  async findAll(status: string | undefined, caller: User): Promise<MarketingRequest[]> {
+    const statusFilter = status ? { status: status as RequestStatus } : {};
+    if (caller.role === UserRole.SUPERVISOR) {
+      const mine = (
+        await this.assignments.find({
+          where: { userId: caller.id },
+          select: { storeId: true },
+        })
+      ).map((a) => a.storeId);
+      if (!mine.length) return [];
+      return this.requests.find({
+        where: { ...statusFilter, storeId: In(mine) },
+        order: { createdAt: 'DESC' },
+      });
+    }
     return this.requests.find({
-      where: status ? { status: status as RequestStatus } : {},
+      where: statusFilter,
       order: { createdAt: 'DESC' },
     });
   }

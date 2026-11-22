@@ -4,17 +4,24 @@ import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import localStores, { getStoreStats, type Store } from '@/data/stores'
 import { apiGet } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 
+const { user } = useAuth()
 const stores = ref<Store[]>(localStores)
 const live = ref(false)
+// Supervisors and users only see their assigned stores; everyone else sees all.
+const scoped = computed(() => ['supervisor', 'user'].includes(user.value?.role ?? ''))
 
 onMounted(async () => {
   try {
-    const api = await apiGet<{ id: number; name: string; region: string }[]>('/stores')
+    const api = await apiGet<{ id: number; name: string; region: string }[]>(
+      scoped.value ? '/stores/mine' : '/stores',
+    )
     stores.value = api.map((s) => ({ id: s.id, city: s.name, region: s.region }))
     live.value = true
   } catch {
-    // API offline — fall back to local mock data
+    // Scoped roles never fall back to the full bundled list.
+    if (scoped.value) stores.value = []
   }
 })
 
@@ -78,6 +85,12 @@ const filtered = computed(() => {
       >
         <span :class="['h-2 w-2 rounded-full', live ? 'bg-emerald-500' : 'bg-slate-400']" />
         {{ live ? 'Live — API' : 'Demo data' }}
+      </span>
+      <span
+        v-if="scoped"
+        class="rounded-full bg-brand-50 px-3 py-1.5 text-xs font-bold text-brand-700"
+      >
+        Your assigned stores
       </span>
     </div>
 

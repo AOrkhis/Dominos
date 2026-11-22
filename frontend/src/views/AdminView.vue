@@ -43,13 +43,16 @@ interface ApiContest {
 // ---------- shared state ----------
 type Tab = 'people' | 'requests' | 'calendar' | 'materials' | 'contest'
 const tab = ref<Tab>('people')
-const tabs: { id: Tab; label: string }[] = [
+const isSupervisor = computed(() => user.value?.role === 'supervisor')
+const allTabs: { id: Tab; label: string }[] = [
   { id: 'people', label: 'People & Stores' },
   { id: 'requests', label: 'Requests Inbox' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'materials', label: 'Materials' },
   { id: 'contest', label: 'Contest' },
 ]
+// Supervisors manage people and see their stores' requests — content stays admin-only.
+const tabs = computed(() => (isSupervisor.value ? allTabs.slice(0, 2) : allTabs))
 
 const loading = ref(true)
 const error = ref('')
@@ -86,20 +89,25 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [s, u, r, c, m, ct] = await Promise.all([
-      apiGet<ApiStore[]>('/stores'),
+    // /stores/mine: all stores for admins, only assigned ones for supervisors.
+    const [s, u, r] = await Promise.all([
+      apiGet<ApiStore[]>('/stores/mine'),
       apiGet<ApiUser[]>('/users'),
       apiGet<ApiRequest[]>('/requests'),
-      apiGet<ApiCampaign[]>('/campaigns'),
-      apiGet<ApiMaterial[]>('/materials/all'),
-      apiGet<ApiContest>('/contest'),
     ])
     stores.value = s
     users.value = u
     requests.value = r
-    campaigns.value = c
-    materials.value = m
-    contest.value = ct
+    if (!isSupervisor.value) {
+      const [c, m, ct] = await Promise.all([
+        apiGet<ApiCampaign[]>('/campaigns'),
+        apiGet<ApiMaterial[]>('/materials/all'),
+        apiGet<ApiContest>('/contest'),
+      ])
+      campaigns.value = c
+      materials.value = m
+      contest.value = ct
+    }
   } catch (e) {
     fail(e)
   } finally {
@@ -410,9 +418,10 @@ const btn =
         <input v-model="newUser.name" :class="input" placeholder="Full name" required />
         <input v-model="newUser.email" :class="input" type="email" placeholder="Email" required />
         <input v-model="newUser.password" :class="input" type="password" placeholder="Password (8+ chars)" required minlength="8" />
-        <select v-model="newUser.role" :class="input">
+        <select v-if="!isSupervisor" v-model="newUser.role" :class="input">
           <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
         </select>
+        <span v-else :class="[input, 'bg-slate-50 text-slate-500']">Role: User</span>
         <button :class="btn" :disabled="busy" type="submit">Add person</button>
       </form>
 
@@ -430,6 +439,7 @@ const btn =
             </div>
 
             <select
+              v-if="!isSupervisor"
               :class="[input, 'w-36']"
               :value="u.role"
               :disabled="u.role === 'super_admin' && user?.role !== 'super_admin'"
@@ -437,24 +447,29 @@ const btn =
             >
               <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
             </select>
+            <span v-else class="w-28 rounded-full bg-slate-100 px-3 py-1.5 text-center text-xs font-bold text-slate-600">
+              {{ roleLabels[u.role] }}
+            </span>
 
-            <button
-              :class="[
-                'rounded-full px-4 py-1.5 text-xs font-bold transition',
-                u.isActive
-                  ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                  : 'bg-slate-200 text-slate-500 hover:bg-slate-300',
-              ]"
-              @click="toggleActive(u)"
-            >
-              {{ u.isActive ? 'Active' : 'Disabled' }}
-            </button>
-            <button
-              class="rounded-full px-4 py-1.5 text-xs font-bold text-accent-600 transition hover:bg-accent-50"
-              @click="removeUser(u)"
-            >
-              Delete
-            </button>
+            <template v-if="!isSupervisor">
+              <button
+                :class="[
+                  'rounded-full px-4 py-1.5 text-xs font-bold transition',
+                  u.isActive
+                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                    : 'bg-slate-200 text-slate-500 hover:bg-slate-300',
+                ]"
+                @click="toggleActive(u)"
+              >
+                {{ u.isActive ? 'Active' : 'Disabled' }}
+              </button>
+              <button
+                class="rounded-full px-4 py-1.5 text-xs font-bold text-accent-600 transition hover:bg-accent-50"
+                @click="removeUser(u)"
+              >
+                Delete
+              </button>
+            </template>
           </div>
 
           <!-- Store assignments -->
@@ -514,13 +529,24 @@ const btn =
           <p class="font-display font-bold text-brand-800">Store {{ r.store.id }} — {{ r.store.name }}</p>
           <span class="text-xs text-slate-400">{{ fmtDate(r.createdAt.slice(0, 10)) }}</span>
           <select
+            v-if="!isSupervisor"
             :class="[input, 'ml-auto w-36 !py-1.5 text-xs']"
             :value="r.status"
             @change="setRequestStatus(r, ($event.target as HTMLSelectElement).value)"
           >
             <option v-for="s in requestStatuses" :key="s.value" :value="s.value">{{ s.label }}</option>
           </select>
-          <button class="text-xs font-bold text-accent-600 hover:underline" @click="removeRequest(r)">
+          <span
+            v-else
+            class="ml-auto rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600"
+          >
+            {{ requestStatuses.find((s) => s.value === r.status)?.label ?? r.status }}
+          </span>
+          <button
+            v-if="!isSupervisor"
+            class="text-xs font-bold text-accent-600 hover:underline"
+            @click="removeRequest(r)"
+          >
             Delete
           </button>
         </div>

@@ -9,8 +9,9 @@ import {
 } from '@nestjs/common';
 import { PasswordHasher } from '@nestjs/authentication';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
+import { StoreAssignment } from '../assignments/store-assignment.entity.js';
 import { User, UserRole } from './user.entity.js';
 
 const ROLES = Object.values(UserRole);
@@ -21,9 +22,19 @@ export class UsersService implements OnApplicationBootstrap {
 
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly passwordHasher: PasswordHasher,
     private readonly config: ConfigService,
   ) {}
+
+  /** Store ids a user is assigned to (empty for admin roles — they see all). */
+  private async assignedStoreIds(userId: string): Promise<number[]> {
+    const rows = await this.dataSource.getRepository(StoreAssignment).find({
+      where: { userId },
+      select: { storeId: true },
+    });
+    return rows.map((r) => r.storeId);
+  }
 
   /** Seed the first super admin so there is always a way in. */
   async onApplicationBootstrap() {
@@ -47,8 +58,21 @@ export class UsersService implements OnApplicationBootstrap {
     this.logger.log(`Seeded super admin ${email} (password from SEED_ADMIN_PASSWORD)`);
   }
 
-  findAll(): Promise<User[]> {
+  /**
+   * Admin/super_admin: everyone. Supervisor: only the users assigned to
+   * the same stores as them (which includes the supervisor themself).
+   */
+  async findAll(caller: User): Promise<User[]> {
+    if (caller.role !== UserRole.SUPERVISOR) {
+      return this.users.find({
+        relations: { assignments: { store: true } },
+        order: { createdAt: 'ASC' },
+      });
+    }
+    const storeIds = await this.assignedStoreIds(caller.id);
+    if (!storeIds.length) return [caller];
     return this.users.find({
+      where: { assignments: { storeId: In(storeIds) } },
       relations: { assignments: { store: true } },
       order: { createdAt: 'ASC' },
     });
@@ -60,6 +84,17 @@ export class UsersService implements OnApplicationBootstrap {
       relations: { assignments: { store: true } },
     });
     if (!user) throw new NotFoundException(`User ${id} not found`);
+    return user;
+  }
+
+  /** findOne + supervisor scope: only self or users sharing an assigned store. */
+  async findOneVisible(id: string, caller: User): Promise<User> {
+    const user = await this.findOne(id);
+    if (caller.role === UserRole.SUPERVISOR && user.id !== caller.id) {
+      const mine = await this.assignedStoreIds(caller.id);
+      if (!user.assignments.some((a) => mine.includes(a.storeId)))
+        throw new ForbiddenException('This user is not assigned to one of your stores');
+    }
     return user;
   }
 
@@ -82,6 +117,8 @@ export class UsersService implements OnApplicationBootstrap {
       throw new BadRequestException(`role must be one of: ${ROLES.join(', ')}`);
     if (role === UserRole.SUPER_ADMIN && caller.role !== UserRole.SUPER_ADMIN)
       throw new ForbiddenException('Only a super admin can create a super admin');
+    if (caller.role === UserRole.SUPERVISOR && role !== UserRole.USER)
+      throw new ForbiddenException('Supervisors can only create user accounts');
 
     try {
       const user = await this.users.save(
