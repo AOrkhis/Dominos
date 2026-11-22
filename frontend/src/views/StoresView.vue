@@ -1,17 +1,31 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import stores, { getStoreStats } from '@/data/stores'
+import localStores, { getStoreStats, type Store } from '@/data/stores'
+import { apiGet } from '@/lib/api'
+
+const stores = ref<Store[]>(localStores)
+const live = ref(false)
+
+onMounted(async () => {
+  try {
+    const api = await apiGet<{ id: number; name: string; region: string }[]>('/stores')
+    stores.value = api.map((s) => ({ id: s.id, city: s.name, region: s.region }))
+    live.value = true
+  } catch {
+    // API offline — fall back to local mock data
+  }
+})
 
 const query = ref('')
 const region = ref('all')
 
-const regions = computed(() => ['all', ...new Set(stores.map((s) => s.region))])
+const regions = computed(() => ['all', ...new Set(stores.value.map((s) => s.region))])
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
-  return stores.filter(
+  return stores.value.filter(
     (s) =>
       (region.value === 'all' || s.region === region.value) &&
       (!q || String(s.id).includes(q) || s.city.toLowerCase().includes(q)),
@@ -56,6 +70,15 @@ const filtered = computed(() => {
           {{ r === 'all' ? 'All regions' : r }}
         </option>
       </select>
+      <span
+        :class="[
+          'ml-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold',
+          live ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500',
+        ]"
+      >
+        <span :class="['h-2 w-2 rounded-full', live ? 'bg-emerald-500' : 'bg-slate-400']" />
+        {{ live ? 'Live — API' : 'Demo data' }}
+      </span>
     </div>
 
     <!-- Store grid -->
