@@ -157,7 +157,7 @@ const steps = [
 
           <div class="absolute bottom-0 left-6 animate-fade-up rounded-2xl border border-white/10 bg-accent-500/90 p-4 shadow-xl backdrop-blur-md" style="animation-delay: 0.45s">
             <p class="text-[10px] font-bold tracking-widest text-white/80 uppercase">Contest leader</p>
-            <p class="font-display mt-1 text-xl font-extrabold text-white">Store 654</p>
+            <p class="font-display mt-1 text-xl font-extrabold text-white">Store 10654</p>
             <p class="text-xs text-white/80">24.6% attach rate</p>
           </div>
         </div>
