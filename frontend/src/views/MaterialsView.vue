@@ -1,10 +1,34 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import { materialCategories } from '@/data/materials'
+import { materialCategories, type MaterialCategory } from '@/data/materials'
+import { apiGet } from '@/lib/api'
 
+interface ApiMaterial {
+  name: string
+  detail: string
+  leadTime: string
+  category: string
+}
+
+const categories = ref<MaterialCategory[]>(materialCategories)
 const active = ref<string>('all')
+
+onMounted(async () => {
+  try {
+    const api = await apiGet<ApiMaterial[]>('/materials')
+    // Category shells (names, gradients) are presentation — items come from the DB.
+    categories.value = materialCategories.map((cat) => ({
+      ...cat,
+      items: api
+        .filter((m) => m.category === cat.slug)
+        .map((m) => ({ name: m.name, detail: m.detail, leadTime: m.leadTime })),
+    }))
+  } catch {
+    // API offline — bundled data stays
+  }
+})
 </script>
 
 <template>
@@ -29,7 +53,7 @@ const active = ref<string>('all')
         All
       </button>
       <button
-        v-for="cat in materialCategories"
+        v-for="cat in categories"
         :key="cat.slug"
         :class="[
           'rounded-full px-5 py-2 text-sm font-semibold transition',
@@ -46,7 +70,7 @@ const active = ref<string>('all')
     <!-- Categories -->
     <div class="mt-10 space-y-14">
       <section
-        v-for="cat in materialCategories.filter((c) => active === 'all' || c.slug === active)"
+        v-for="cat in categories.filter((c) => active === 'all' || c.slug === active)"
         :key="cat.slug"
       >
         <div :class="['relative overflow-hidden rounded-2xl bg-gradient-to-r p-8 text-white sm:p-10', cat.gradient]">

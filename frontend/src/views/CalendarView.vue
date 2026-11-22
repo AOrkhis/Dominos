@@ -1,7 +1,38 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { campaigns, campaignTypes, type Campaign } from '@/data/campaigns'
+import {
+  campaigns as localCampaigns,
+  campaignTypes,
+  type Campaign,
+  type CampaignType,
+} from '@/data/campaigns'
+import { apiGet } from '@/lib/api'
+
+interface ApiCampaign {
+  title: string
+  startDate: string
+  endDate: string
+  type: CampaignType
+  description: string
+}
+
+const campaigns = ref<Campaign[]>(localCampaigns)
+
+onMounted(async () => {
+  try {
+    const api = await apiGet<ApiCampaign[]>('/campaigns')
+    campaigns.value = api.map((c) => ({
+      title: c.title,
+      start: c.startDate,
+      end: c.endDate,
+      type: c.type,
+      description: c.description,
+    }))
+  } catch {
+    // API offline — bundled data stays
+  }
+})
 
 const monthOptions = [
   { year: 2026, month: 10 }, // November
@@ -42,7 +73,7 @@ const cells = computed<Cell[]>(() => {
       date,
       inMonth: date.getMonth() === month,
       isToday: key === today,
-      campaigns: campaigns.filter((c) => c.start <= key && c.end >= key),
+      campaigns: campaigns.value.filter((c) => c.start <= key && c.end >= key),
     }
   })
 })
@@ -51,7 +82,7 @@ const monthCampaigns = computed(() => {
   const { year, month } = monthOptions[monthIndex.value]!
   const first = toKey(new Date(year, month, 1))
   const last = toKey(new Date(year, month + 1, 0))
-  return campaigns.filter((c) => c.start <= last && c.end >= first)
+  return campaigns.value.filter((c) => c.start <= last && c.end >= first)
 })
 
 const fmtRange = (c: Campaign) => {

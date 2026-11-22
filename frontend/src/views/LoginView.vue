@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import DominoLogo from '@/components/DominoLogo.vue'
 import { useAuth } from '@/lib/auth'
 
 const router = useRouter()
+const route = useRoute()
 const { login } = useAuth()
 
 const email = ref('')
@@ -17,7 +18,8 @@ const submit = async () => {
   loading.value = true
   try {
     await login(email.value, password.value)
-    router.push('/')
+    const redirect = route.query.redirect
+    router.push(typeof redirect === 'string' && redirect.startsWith('/') ? redirect : '/')
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Sign-in failed'
   } finally {

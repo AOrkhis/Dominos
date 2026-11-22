@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import stores from '@/data/stores'
+import localStores, { type Store } from '@/data/stores'
 import { materialCategories } from '@/data/materials'
+import { apiGet, apiPost } from '@/lib/api'
 
 const route = useRoute()
 
-// Original form options, grouped for readability.
-const options = [
+const stores = ref<Store[]>(localStores)
+
+// Fallback option groups if the API is unreachable.
+const options = ref([
   {
     group: 'Signage & Print',
     items: [
@@ -32,7 +35,30 @@ const options = [
     group: 'Store & Vehicle',
     items: ['Menuboard Update', 'Uniforms', 'More Cartops', 'Fix Broken Cartops'],
   },
-]
+])
+
+interface ApiMaterial {
+  name: string
+  category: string
+}
+
+onMounted(async () => {
+  try {
+    const [apiStores, apiMaterials] = await Promise.all([
+      apiGet<{ id: number; name: string; region: string }[]>('/stores'),
+      apiGet<ApiMaterial[]>('/materials'),
+    ])
+    stores.value = apiStores.map((s) => ({ id: s.id, city: s.name, region: s.region }))
+    options.value = materialCategories
+      .map((cat) => ({
+        group: cat.name,
+        items: apiMaterials.filter((m) => m.category === cat.slug).map((m) => m.name),
+      }))
+      .filter((g) => g.items.length)
+  } catch {
+    // API offline — bundled data stays
+  }
+})
 
 const form = reactive({
   storeId: '',
@@ -46,11 +72,11 @@ const selected = ref<Set<string>>(new Set())
 // Pre-select when arriving from a catalog "Request this" link.
 const preset = route.query.item
 if (typeof preset === 'string') {
-  const match = options
+  const match = options.value
     .flatMap((g) => g.items)
     .find((i) => i.toLowerCase() === preset.toLowerCase() || preset.toLowerCase().includes(i.toLowerCase()))
   // Catalog names differ slightly; fall back to closest partial match.
-  const loose = options
+  const loose = options.value
     .flatMap((g) => g.items)
     .find((i) => {
       const p = preset.toLowerCase().replace(/[^a-z ]/g, '')
@@ -68,20 +94,35 @@ const toggle = (item: string) => {
 
 const errors = ref<string[]>([])
 const submitted = ref(false)
+const sending = ref(false)
 
-const canSubmit = computed(() => form.storeId && selected.value.size > 0)
+const canSubmit = computed(() => form.storeId && selected.value.size > 0 && !sending.value)
 
-const submit = () => {
+const submit = async () => {
   errors.value = []
   if (!form.storeId) errors.value.push('Choose your store number.')
   if (selected.value.size === 0) errors.value.push('Select at least one material.')
   if (errors.value.length) return
-  submitted.value = true
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  sending.value = true
+  try {
+    await apiPost('/requests', {
+      storeId: Number(form.storeId),
+      contact: form.contact || undefined,
+      neededBy: form.neededBy || undefined,
+      items: [...selected.value],
+      notes: form.notes || undefined,
+    })
+    submitted.value = true
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  } catch (e) {
+    errors.value.push(e instanceof Error ? e.message : 'Submission failed — try again.')
+  } finally {
+    sending.value = false
+  }
 }
 
 const storeLabel = computed(() => {
-  const s = stores.find((x) => String(x.id) === form.storeId)
+  const s = stores.value.find((x) => String(x.id) === form.storeId)
   return s ? `${s.id} — ${s.city}` : form.storeId
 })
 </script>
@@ -229,7 +270,7 @@ const storeLabel = computed(() => {
           :disabled="!canSubmit"
           class="rounded-full bg-accent-500 px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-accent-500/25 transition hover:-translate-y-0.5 hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
         >
-          Submit Request
+          {{ sending ? 'Sending…' : 'Submit Request' }}
         </button>
         <p class="text-xs text-slate-500">
           Typical turnaround is shown on each material — rush jobs? Call

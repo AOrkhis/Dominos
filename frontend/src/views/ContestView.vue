@@ -1,23 +1,71 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import { contest, leaderboard } from '@/data/contest'
+import {
+  contest as localContest,
+  leaderboard as localLeaderboard,
+  type ContestEntry,
+} from '@/data/contest'
+import { apiGet } from '@/lib/api'
+
+interface ApiContest {
+  title: string
+  product: string
+  startDate: string
+  endDate: string
+  intro: string
+  teamPrize: string
+  storePrize: string
+  entries: {
+    store: { id: number }
+    manager: string
+    upsellRate: string | number
+    qualifyingOrders: number
+    trend: ContestEntry['trend']
+  }[]
+}
+
+const contest = ref(localContest)
+const leaderboard = ref<ContestEntry[]>(localLeaderboard)
+
+onMounted(async () => {
+  try {
+    const c = await apiGet<ApiContest>('/contest')
+    contest.value = {
+      title: c.title,
+      product: c.product,
+      start: c.startDate,
+      end: c.endDate,
+      intro: c.intro,
+      teamPrize: c.teamPrize,
+      storePrize: c.storePrize,
+    }
+    leaderboard.value = c.entries.map((e) => ({
+      storeId: e.store.id,
+      manager: e.manager,
+      upsellRate: Number(e.upsellRate),
+      qualifyingOrders: e.qualifyingOrders,
+      trend: e.trend,
+    }))
+  } catch {
+    // API offline — bundled data stays
+  }
+})
 
 const now = new Date()
-const start = new Date(`${contest.start}T00:00:00`)
-const end = new Date(`${contest.end}T23:59:59`)
-
 const daysUntil = (d: Date) => Math.max(0, Math.ceil((d.getTime() - now.getTime()) / 86400000))
-const status = computed(() =>
-  now < start
+const status = computed(() => {
+  const start = new Date(`${contest.value.start}T00:00:00`)
+  const end = new Date(`${contest.value.end}T23:59:59`)
+  return now < start
     ? { label: 'Starts in', days: daysUntil(start), live: false }
     : now > end
       ? { label: 'Contest ended', days: 0, live: false }
-      : { label: 'Days left', days: daysUntil(end), live: true },
-)
+      : { label: 'Days left', days: daysUntil(end), live: true }
+})
 
-const maxRate = Math.max(...leaderboard.map((e) => e.upsellRate))
+const maxRate = computed(() => Math.max(1, ...leaderboard.value.map((e) => e.upsellRate)))
 
 const medal = (i: number) =>
   ['bg-gold-400 text-white', 'bg-slate-300 text-slate-700', 'bg-amber-700 text-white'][i] ??

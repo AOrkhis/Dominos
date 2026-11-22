@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import DominoLogo from './DominoLogo.vue'
 import { useAuth } from '@/lib/auth'
@@ -14,6 +14,8 @@ const roleLabels: Record<string, string> = {
   supervisor: 'Supervisor',
   user: 'User',
 }
+
+const isAdmin = computed(() => ['admin', 'super_admin'].includes(user.value?.role ?? ''))
 
 const onLogout = () => {
   logout()
@@ -76,6 +78,14 @@ const links = [
           >
             {{ link.label }}
           </RouterLink>
+          <RouterLink
+            v-if="isAdmin"
+            to="/admin"
+            class="rounded-full bg-brand-900 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-brand-800"
+            active-class="!bg-accent-500"
+          >
+            Admin
+          </RouterLink>
         </nav>
 
         <div class="flex items-center gap-3">
@@ -126,6 +136,14 @@ const links = [
           @click="open = false"
         >
           {{ link.label }}
+        </RouterLink>
+        <RouterLink
+          v-if="isAdmin"
+          to="/admin"
+          class="mt-2 block rounded-lg bg-brand-900 px-3 py-2.5 text-center text-sm font-bold text-white"
+          @click="open = false"
+        >
+          Admin Dashboard
         </RouterLink>
         <RouterLink
           v-if="!isLoggedIn"
