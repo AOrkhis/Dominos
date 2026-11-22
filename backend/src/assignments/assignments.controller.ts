@@ -7,10 +7,14 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { ADMIN_ROLES, Roles, RolesGuard } from '../auth/roles.js';
 import { AssignmentsService } from './assignments.service.js';
 
 @Controller('assignments')
+@UseGuards(RolesGuard)
+@Roles(...ADMIN_ROLES)
 export class AssignmentsController {
   constructor(private readonly assignments: AssignmentsService) {}
 

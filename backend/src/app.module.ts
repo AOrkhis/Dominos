@@ -7,6 +7,10 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AssignmentsModule } from './assignments/assignments.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { CampaignsModule } from './campaigns/campaigns.module.js';
+import { ContestsModule } from './contests/contests.module.js';
+import { MaterialsModule } from './materials/materials.module.js';
+import { RequestsModule } from './requests/requests.module.js';
 import { StoresModule } from './stores/stores.module.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -47,6 +51,10 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     UsersModule,
     StoresModule,
     AssignmentsModule,
+    CampaignsModule,
+    MaterialsModule,
+    ContestsModule,
+    RequestsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

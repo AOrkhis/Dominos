@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -62,12 +63,15 @@ export class UsersService implements OnApplicationBootstrap {
     return user;
   }
 
-  async create(body: {
-    name?: string;
-    email?: string;
-    password?: string;
-    role?: string;
-  }): Promise<User> {
+  async create(
+    body: {
+      name?: string;
+      email?: string;
+      password?: string;
+      role?: string;
+    },
+    caller: User,
+  ): Promise<User> {
     if (!body.name?.trim()) throw new BadRequestException('name is required');
     if (!body.email?.includes('@'))
       throw new BadRequestException('a valid email is required');
@@ -76,6 +80,8 @@ export class UsersService implements OnApplicationBootstrap {
     const role = (body.role ?? UserRole.USER) as UserRole;
     if (!ROLES.includes(role))
       throw new BadRequestException(`role must be one of: ${ROLES.join(', ')}`);
+    if (role === UserRole.SUPER_ADMIN && caller.role !== UserRole.SUPER_ADMIN)
+      throw new ForbiddenException('Only a super admin can create a super admin');
 
     try {
       const user = await this.users.save(
@@ -97,20 +103,33 @@ export class UsersService implements OnApplicationBootstrap {
   async update(
     id: string,
     body: { name?: string; role?: string; isActive?: boolean },
+    caller: User,
   ): Promise<User> {
     const user = await this.findOne(id);
+    const callerIsSuper = caller.role === UserRole.SUPER_ADMIN;
+    if (user.role === UserRole.SUPER_ADMIN && !callerIsSuper)
+      throw new ForbiddenException('Only a super admin can modify a super admin');
+    if (user.id === caller.id && (body.role !== undefined || body.isActive === false))
+      throw new ForbiddenException('You cannot demote or deactivate yourself');
     if (body.name !== undefined) user.name = body.name.trim();
     if (body.role !== undefined) {
       const role = body.role as UserRole;
       if (!ROLES.includes(role))
         throw new BadRequestException(`role must be one of: ${ROLES.join(', ')}`);
+      if (role === UserRole.SUPER_ADMIN && !callerIsSuper)
+        throw new ForbiddenException('Only a super admin can grant super admin');
       user.role = role;
     }
     if (body.isActive !== undefined) user.isActive = body.isActive;
     return this.users.save(user);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, caller: User): Promise<void> {
+    if (id === caller.id)
+      throw new ForbiddenException('You cannot delete your own account');
+    const target = await this.findOne(id);
+    if (target.role === UserRole.SUPER_ADMIN && caller.role !== UserRole.SUPER_ADMIN)
+      throw new ForbiddenException('Only a super admin can delete a super admin');
     const result = await this.users.delete({ id });
     if (!result.affected) throw new NotFoundException(`User ${id} not found`);
   }
