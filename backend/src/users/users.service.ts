@@ -2,20 +2,49 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
+import { PasswordHasher } from '@nestjs/authentication';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
-import bcrypt from 'bcryptjs';
 import { User, UserRole } from './user.entity.js';
 
 const ROLES = Object.values(UserRole);
 
 @Injectable()
-export class UsersService {
+export class UsersService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
+    private readonly passwordHasher: PasswordHasher,
+    private readonly config: ConfigService,
   ) {}
+
+  /** Seed the first super admin so there is always a way in. */
+  async onApplicationBootstrap() {
+    const exists = await this.users.exists({
+      where: { role: UserRole.SUPER_ADMIN },
+    });
+    if (exists) return;
+    const email = (
+      this.config.get<string>('SEED_ADMIN_EMAIL') ?? 'admin@dominos.qc.ca'
+    ).toLowerCase();
+    const password =
+      this.config.get<string>('SEED_ADMIN_PASSWORD') ?? 'change-me-now';
+    await this.users.save(
+      this.users.create({
+        name: 'Super Admin',
+        email,
+        passwordHash: await this.passwordHasher.hash(password),
+        role: UserRole.SUPER_ADMIN,
+      }),
+    );
+    this.logger.log(`Seeded super admin ${email} (password from SEED_ADMIN_PASSWORD)`);
+  }
 
   findAll(): Promise<User[]> {
     return this.users.find({
@@ -53,7 +82,7 @@ export class UsersService {
         this.users.create({
           name: body.name.trim(),
           email: body.email.trim().toLowerCase(),
-          passwordHash: await bcrypt.hash(body.password, 10),
+          passwordHash: await this.passwordHasher.hash(body.password),
           role,
         }),
       );

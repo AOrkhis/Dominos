@@ -1,9 +1,24 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import DominoLogo from './DominoLogo.vue'
+import { useAuth } from '@/lib/auth'
 
 const open = ref(false)
+const router = useRouter()
+const { user, isLoggedIn, logout } = useAuth()
+
+const roleLabels: Record<string, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Admin',
+  supervisor: 'Supervisor',
+  user: 'User',
+}
+
+const onLogout = () => {
+  logout()
+  router.push('/')
+}
 
 const links = [
   { to: '/', label: 'Home' },
@@ -64,11 +79,27 @@ const links = [
         </nav>
 
         <div class="flex items-center gap-3">
-          <button
+          <div v-if="isLoggedIn && user" class="hidden items-center gap-3 sm:flex">
+            <div class="text-right leading-tight">
+              <p class="text-sm font-bold text-slate-800">{{ user.name }}</p>
+              <p class="text-[11px] font-semibold tracking-wide text-brand-600 uppercase">
+                {{ roleLabels[user.role] ?? user.role }}
+              </p>
+            </div>
+            <button
+              class="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-accent-500 hover:text-accent-600"
+              @click="onLogout"
+            >
+              Log Out
+            </button>
+          </div>
+          <RouterLink
+            v-else
+            to="/login"
             class="hidden rounded-full bg-accent-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-accent-600 sm:block"
           >
             Log In
-          </button>
+          </RouterLink>
           <button
             class="rounded-lg p-2 text-slate-700 transition hover:bg-slate-100 lg:hidden"
             aria-label="Toggle menu"
@@ -96,6 +127,21 @@ const links = [
         >
           {{ link.label }}
         </RouterLink>
+        <RouterLink
+          v-if="!isLoggedIn"
+          to="/login"
+          class="mt-2 block rounded-lg bg-accent-500 px-3 py-2.5 text-center text-sm font-bold text-white"
+          @click="open = false"
+        >
+          Log In
+        </RouterLink>
+        <button
+          v-else
+          class="mt-2 block w-full rounded-lg border border-slate-300 px-3 py-2.5 text-center text-sm font-bold text-slate-600"
+          @click="onLogout(); open = false"
+        >
+          Log Out ({{ user?.name }})
+        </button>
       </nav>
     </div>
   </header>

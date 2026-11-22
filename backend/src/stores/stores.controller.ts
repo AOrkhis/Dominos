@@ -1,5 +1,8 @@
 import { Controller, Get, Param, ParseIntPipe } from '@nestjs/common';
+import { Public } from '@nestjs/authentication';
 import { StoresService } from './stores.service.js';
+
+@Public() // the public storefront reads this without signing in
 
 @Controller('stores')
 export class StoresController {

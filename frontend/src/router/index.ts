@@ -40,6 +40,11 @@ const router = createRouter({
       name: 'contest',
       component: () => import('@/views/ContestView.vue'),
     },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

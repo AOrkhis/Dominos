@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
+import { AuthenticationModule } from '@nestjs/authentication';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { createObserveModule } from '@nestjs/observe';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AssignmentsModule } from './assignments/assignments.module.js';
+import { AuthModule } from './auth/auth.module.js';
 import { StoresModule } from './stores/stores.module.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -35,6 +37,13 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
       appSecret: process.env.OBSERVE_APP_SECRET ?? 'YOUR_APP_SECRET',
       serviceId: 'backend',
     }),
+    AuthenticationModule.forRoot({
+      accessToken: {
+        key: process.env.JWT_SECRET!,
+        ttl: '15m',
+      },
+    }),
+    AuthModule,
     UsersModule,
     StoresModule,
     AssignmentsModule,
