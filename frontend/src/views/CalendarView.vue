@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import {
-  campaigns as localCampaigns,
-  campaignTypes,
-  type Campaign,
-  type CampaignType,
-} from '@/data/campaigns'
+import { campaignTypes, type Campaign, type CampaignType } from '@/data/campaigns'
 import { apiGet } from '@/lib/api'
 
 interface ApiCampaign {
@@ -17,7 +12,9 @@ interface ApiCampaign {
   description: string
 }
 
-const campaigns = ref<Campaign[]>(localCampaigns)
+const campaigns = ref<Campaign[]>([])
+const loading = ref(true)
+const loadError = ref('')
 
 onMounted(async () => {
   try {
@@ -30,7 +27,9 @@ onMounted(async () => {
       description: c.description,
     }))
   } catch {
-    // API offline — bundled data stays
+    loadError.value = 'Could not load the calendar — the marketing API is unreachable.'
+  } finally {
+    loading.value = false
   }
 })
 
@@ -140,8 +139,16 @@ const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
       </div>
     </div>
 
+    <p
+      v-if="loadError"
+      class="mt-6 rounded-xl border border-accent-500/30 bg-accent-50 p-4 text-sm font-semibold text-accent-600"
+    >
+      {{ loadError }}
+    </p>
+    <p v-if="loading" class="mt-6 text-sm text-slate-500">Loading calendar…</p>
+
     <!-- Calendar grid -->
-    <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div v-else class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div class="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
         <div
           v-for="d in weekDays"
@@ -193,10 +200,11 @@ const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     </div>
 
     <!-- Campaign details -->
-    <h3 class="font-display mt-12 text-2xl font-bold text-slate-900">
-      Campaigns in {{ monthName }}
-    </h3>
-    <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <template v-if="!loading">
+      <h3 class="font-display mt-12 text-2xl font-bold text-slate-900">
+        Campaigns in {{ monthName }}
+      </h3>
+      <div class="mt-6 grid gap-4 md:grid-cols-2">
       <article
         v-for="c in monthCampaigns"
         :key="c.title"
@@ -212,6 +220,7 @@ const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         <p class="mt-2 text-sm leading-relaxed text-slate-600">{{ c.description }}</p>
       </article>
       <p v-if="!monthCampaigns.length" class="text-slate-500">No campaigns scheduled this month.</p>
-    </div>
+      </div>
+    </template>
   </section>
 </template>
