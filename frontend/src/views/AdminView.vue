@@ -553,27 +553,24 @@ const confirmBtn = (key: string) =>
             {{ r === 'all' ? 'All' : roleLabels[r] }}
           </button>
         </div>
-        <button :class="btn" class="ml-auto" @click="showAddUser = !showAddUser">
+        <button v-if="canManage" :class="btn" class="ml-auto" @click="showAddUser = !showAddUser">
           {{ showAddUser ? '− Close' : '+ Add person' }}
         </button>
       </div>
 
       <!-- Add person -->
       <form
-        v-if="showAddUser"
+        v-if="showAddUser && canManage"
         class="grid gap-4 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-5"
         @submit.prevent="createUser"
       >
-        <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-5">
-          New {{ isSupervisor ? 'store user' : 'account' }}
-        </h3>
+        <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-5">New account</h3>
         <input v-model="newUser.name" :class="input" placeholder="Full name" required />
         <input v-model="newUser.email" :class="input" type="email" placeholder="Email" required />
         <input v-model="newUser.password" :class="input" type="password" placeholder="Password (8+ chars)" required minlength="8" />
-        <select v-if="!isSupervisor" v-model="newUser.role" :class="input">
+        <select v-model="newUser.role" :class="input">
           <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
         </select>
-        <span v-else :class="[input, 'bg-slate-100 text-slate-500']">Role: User</span>
         <button :class="btn" :disabled="busy" type="submit">{{ busy ? 'Adding…' : 'Add person' }}</button>
       </form>
 

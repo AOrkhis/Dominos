@@ -10,7 +10,7 @@ import {
 import { PasswordHasher } from '@nestjs/authentication';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import { StoreAssignment } from '../assignments/store-assignment.entity.js';
 import { User, UserRole } from './user.entity.js';
 
@@ -71,16 +71,12 @@ export class UsersService implements OnApplicationBootstrap {
     }
     const storeIds = await this.assignedStoreIds(caller.id);
     if (!storeIds.length) return [await this.findOne(caller.id)];
-    // Users on the supervisor's stores, plus unassigned user accounts
-    // (they can be picked up and assigned to one of the supervisor's stores).
-    return this.users
-      .createQueryBuilder('u')
-      .leftJoinAndSelect('u.assignments', 'a')
-      .leftJoinAndSelect('a.store', 's')
-      .where('a.storeId IN (:...storeIds)', { storeIds })
-      .orWhere('(u.role = :userRole AND a.id IS NULL)', { userRole: UserRole.USER })
-      .orderBy('u.createdAt', 'ASC')
-      .getMany();
+    // Only the users assigned to the supervisor's stores.
+    return this.users.find({
+      where: { assignments: { storeId: In(storeIds) } },
+      relations: { assignments: { store: true } },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   async findOne(id: string): Promise<User> {
@@ -159,10 +155,7 @@ export class UsersService implements OnApplicationBootstrap {
       if (body.role !== undefined)
         throw new ForbiddenException('Supervisors cannot change roles');
       const mine = await this.assignedStoreIds(caller.id);
-      const inScope =
-        !user.assignments.length ||
-        user.assignments.some((a) => mine.includes(a.storeId));
-      if (!inScope)
+      if (!user.assignments.some((a) => mine.includes(a.storeId)))
         throw new ForbiddenException('This user is not assigned to one of your stores');
     }
     if (body.name !== undefined) user.name = body.name.trim();
@@ -188,10 +181,7 @@ export class UsersService implements OnApplicationBootstrap {
       if (target.role !== UserRole.USER)
         throw new ForbiddenException('Supervisors can only delete user accounts');
       const mine = await this.assignedStoreIds(caller.id);
-      const inScope =
-        !target.assignments.length ||
-        target.assignments.some((a) => mine.includes(a.storeId));
-      if (!inScope)
+      if (!target.assignments.some((a) => mine.includes(a.storeId)))
         throw new ForbiddenException('This user is not assigned to one of your stores');
     }
     const result = await this.users.delete({ id });

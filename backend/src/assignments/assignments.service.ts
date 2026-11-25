@@ -100,7 +100,7 @@ export class AssignmentsService {
       }
 
       try {
-        return await manager.save(
+        const saved = await manager.save(
           StoreAssignment,
           manager.create(StoreAssignment, {
             userId: user.id,
@@ -108,6 +108,10 @@ export class AssignmentsService {
             assignedById: caller.id,
           }),
         );
+        // Re-fetch: save() returns the entity without its eager relations.
+        return (await manager.findOne(StoreAssignment, {
+          where: { id: saved.id },
+        }))!;
       } catch (e) {
         if (e instanceof QueryFailedError && e.message.includes('Duplicate'))
           throw new ConflictException(

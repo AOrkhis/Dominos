@@ -36,7 +36,7 @@ export class UsersController {
   }
 
   @Post()
-  @Roles(...MANAGER_ROLES)
+  @Roles(...ADMIN_ROLES)
   create(
     @Body()
     body: { name?: string; email?: string; password?: string; role?: string },
