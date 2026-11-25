@@ -44,17 +44,23 @@ interface ApiContest {
 type Tab = 'people' | 'requests' | 'calendar' | 'materials' | 'contest'
 const tab = ref<Tab>('people')
 const isSupervisor = computed(() => user.value?.role === 'supervisor')
+const isViewer = computed(() => user.value?.role === 'user')
+const canManage = computed(() => ['admin', 'super_admin'].includes(user.value?.role ?? ''))
 const tabs = computed(() => {
   const all: { id: Tab; label: string; icon: string; badge?: number }[] = [
     { id: 'people', label: 'People & Stores', icon: 'users' },
-    { id: 'requests', label: 'Requests', icon: 'inbox', badge: openCount.value },
+    { id: 'requests', label: isViewer.value ? "My store's requests" : 'Requests', icon: 'inbox', badge: openCount.value },
     { id: 'calendar', label: 'Calendar', icon: 'calendar' },
     { id: 'materials', label: 'Materials', icon: 'box' },
     { id: 'contest', label: 'Contest', icon: 'trophy' },
   ]
-  // Supervisors manage people and see their stores' requests — content stays admin-only.
+  // Users only watch their store's requests; supervisors also manage people.
+  if (isViewer.value) return all.filter((t) => t.id === 'requests')
   return isSupervisor.value ? all.slice(0, 2) : all
 })
+const activeTab = computed(() =>
+  tabs.value.some((t) => t.id === tab.value) ? tab.value : tabs.value[0]!.id,
+)
 
 const loading = ref(true)
 const error = ref('')
@@ -121,16 +127,17 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    // /stores/mine: all stores for admins, only assigned ones for supervisors.
-    const [s, u, r] = await Promise.all([
+    // /stores/mine: all stores for admins, only assigned ones for supervisor/user.
+    const [s, r] = await Promise.all([
       apiGet<ApiStore[]>('/stores/mine'),
-      apiGet<ApiUser[]>('/users'),
       apiGet<ApiRequest[]>('/requests'),
     ])
     stores.value = s
-    users.value = u
     requests.value = r
-    if (!isSupervisor.value) {
+    if (!isViewer.value) {
+      users.value = await apiGet<ApiUser[]>('/users')
+    }
+    if (canManage.value) {
       const [c, m, ct] = await Promise.all([
         apiGet<ApiCampaign[]>('/campaigns'),
         apiGet<ApiMaterial[]>('/materials/all'),
@@ -151,15 +158,19 @@ onMounted(loadAll)
 // ---------- stats strip ----------
 const openCount = computed(() => requests.value.filter((r) => r.status !== 'done').length)
 const stats = computed(() => [
-  { label: isSupervisor.value ? 'My stores' : 'Stores', value: stores.value.length, icon: 'store' },
-  { label: 'People', value: users.value.length, icon: 'users' },
+  {
+    label: isSupervisor.value || isViewer.value ? 'My stores' : 'Stores',
+    value: stores.value.length,
+    icon: 'store',
+  },
+  ...(isViewer.value ? [] : [{ label: 'People', value: users.value.length, icon: 'users' }]),
   { label: 'Open requests', value: openCount.value, icon: 'inbox', accent: openCount.value > 0 },
-  ...(isSupervisor.value
-    ? []
-    : [
+  ...(canManage.value
+    ? [
         { label: 'Campaigns', value: campaigns.value.length, icon: 'calendar' },
         { label: 'Materials', value: materials.value.length, icon: 'box' },
-      ]),
+      ]
+    : []),
 ])
 
 // ---------- people ----------
@@ -523,7 +534,7 @@ const confirmBtn = (key: string) =>
     <p v-if="loading" class="mt-14 text-center text-sm text-slate-500">Loading dashboard…</p>
 
     <!-- ==================== PEOPLE ==================== -->
-    <div v-else-if="tab === 'people'" class="mt-8 space-y-5">
+    <div v-else-if="activeTab === 'people'" class="mt-8 space-y-5">
       <div class="flex flex-wrap items-center gap-3">
         <div class="relative min-w-56 flex-1">
           <svg class="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -590,16 +601,18 @@ const confirmBtn = (key: string) =>
             Disabled
           </span>
 
-          <template v-if="!isSupervisor">
-            <select
-              :class="[input, 'w-32 !py-1.5 text-xs']"
-              :value="u.role"
-              :disabled="u.role === 'super_admin' && user?.role !== 'super_admin'"
-              title="Change role"
-              @change="setRole(u, ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
-            </select>
+          <!-- Role changes stay admin-only; supervisors manage user accounts in their stores -->
+          <select
+            v-if="canManage"
+            :class="[input, 'w-32 !py-1.5 text-xs']"
+            :value="u.role"
+            :disabled="u.role === 'super_admin' && user?.role !== 'super_admin'"
+            title="Change role"
+            @change="setRole(u, ($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
+          </select>
+          <template v-if="canManage || (isSupervisor && u.role === 'user')">
             <button
               :class="ghostBtn + ' !px-3 !py-1.5 text-xs'"
               :title="u.isActive ? 'Deactivate account' : 'Activate account'"
@@ -659,7 +672,7 @@ const confirmBtn = (key: string) =>
     </div>
 
     <!-- ==================== REQUESTS ==================== -->
-    <div v-else-if="tab === 'requests'" class="mt-8 space-y-4">
+    <div v-else-if="activeTab === 'requests'" class="mt-8 space-y-4">
       <div class="flex flex-wrap gap-2">
         <button
           v-for="f in (['all', 'new', 'in_progress', 'done'] as const)"
@@ -690,7 +703,7 @@ const confirmBtn = (key: string) =>
           </span>
           <span class="text-xs text-slate-400">{{ fmtDate(r.createdAt.slice(0, 10)) }}</span>
 
-          <template v-if="!isSupervisor">
+          <template v-if="!isViewer">
             <span class="ml-auto flex gap-2">
               <button
                 v-if="r.status === 'new'"
@@ -706,7 +719,7 @@ const confirmBtn = (key: string) =>
               >
                 Mark done
               </button>
-              <button :class="confirmBtn(`r-${r.id}`)" @click="askConfirm(`r-${r.id}`, () => removeRequest(r))">
+              <button v-if="canManage" :class="confirmBtn(`r-${r.id}`)" @click="askConfirm(`r-${r.id}`, () => removeRequest(r))">
                 {{ confirming.has(`r-${r.id}`) ? 'Confirm' : 'Delete' }}
               </button>
             </span>
@@ -731,7 +744,7 @@ const confirmBtn = (key: string) =>
     </div>
 
     <!-- ==================== CALENDAR ==================== -->
-    <div v-else-if="tab === 'calendar'" class="mt-8 space-y-5">
+    <div v-else-if="activeTab === 'calendar'" class="mt-8 space-y-5">
       <div class="flex items-center justify-between">
         <p class="text-sm text-slate-500">{{ campaigns.length }} campaigns — changes go live on the public calendar immediately.</p>
         <button :class="btn" @click="showCampaignForm = !showCampaignForm">
@@ -796,7 +809,7 @@ const confirmBtn = (key: string) =>
     </div>
 
     <!-- ==================== MATERIALS ==================== -->
-    <div v-else-if="tab === 'materials'" class="mt-8 space-y-5">
+    <div v-else-if="activeTab === 'materials'" class="mt-8 space-y-5">
       <div class="flex flex-wrap items-center gap-3">
         <select v-model="materialFilter" :class="[input, 'w-48']">
           <option value="all">All categories</option>
@@ -861,7 +874,7 @@ const confirmBtn = (key: string) =>
     </div>
 
     <!-- ==================== CONTEST ==================== -->
-    <div v-else-if="tab === 'contest' && contest" class="mt-8 space-y-5">
+    <div v-else-if="activeTab === 'contest' && contest" class="mt-8 space-y-5">
       <div class="flex items-center justify-between">
         <div>
           <p class="font-display font-bold text-slate-900">{{ contest.title }}</p>

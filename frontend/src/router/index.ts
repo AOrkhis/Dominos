@@ -50,7 +50,7 @@ const router = createRouter({
       path: '/admin',
       name: 'admin',
       component: () => import('@/views/AdminView.vue'),
-      meta: { roles: ['admin', 'super_admin', 'supervisor'] },
+      meta: { roles: ['admin', 'super_admin', 'supervisor', 'user'] },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

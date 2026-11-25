@@ -46,7 +46,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Roles(...ADMIN_ROLES)
+  @Roles(...MANAGER_ROLES)
   update(
     @Param('id') id: string,
     @Body() body: { name?: string; role?: string; isActive?: boolean },
@@ -57,7 +57,7 @@ export class UsersController {
 
   @Delete(':id')
   @HttpCode(204)
-  @Roles(...ADMIN_ROLES)
+  @Roles(...MANAGER_ROLES)
   remove(@Param('id') id: string, @CurrentUser() caller: User) {
     return this.users.remove(id, caller);
   }

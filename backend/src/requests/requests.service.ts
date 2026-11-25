@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -30,16 +31,23 @@ export class RequestsService {
     private readonly assignments: Repository<StoreAssignment>,
   ) {}
 
-  /** Admins see every request; supervisors only their stores' requests. */
+  /** Store ids the caller is assigned to. */
+  private async callerStoreIds(caller: User): Promise<number[]> {
+    const rows = await this.assignments.find({
+      where: { userId: caller.id },
+      select: { storeId: true },
+    });
+    return rows.map((r) => r.storeId);
+  }
+
+  /**
+   * Admins see every request; supervisors and users only the requests
+   * of the stores they're assigned to.
+   */
   async findAll(status: string | undefined, caller: User): Promise<MarketingRequest[]> {
     const statusFilter = status ? { status: status as RequestStatus } : {};
-    if (caller.role === UserRole.SUPERVISOR) {
-      const mine = (
-        await this.assignments.find({
-          where: { userId: caller.id },
-          select: { storeId: true },
-        })
-      ).map((a) => a.storeId);
+    if (caller.role === UserRole.SUPERVISOR || caller.role === UserRole.USER) {
+      const mine = await this.callerStoreIds(caller);
       if (!mine.length) return [];
       return this.requests.find({
         where: { ...statusFilter, storeId: In(mine) },
@@ -69,11 +77,16 @@ export class RequestsService {
     );
   }
 
-  async setStatus(id: string, status: string): Promise<MarketingRequest> {
+  async setStatus(id: string, status: string, caller: User): Promise<MarketingRequest> {
     if (!STATUSES.includes(status as RequestStatus))
       throw new BadRequestException(`status must be one of: ${STATUSES.join(', ')}`);
     const request = await this.requests.findOne({ where: { id } });
     if (!request) throw new NotFoundException(`Request ${id} not found`);
+    if (caller.role === UserRole.SUPERVISOR) {
+      const mine = await this.callerStoreIds(caller);
+      if (!mine.includes(request.storeId))
+        throw new ForbiddenException('This request does not belong to one of your stores');
+    }
     request.status = status as RequestStatus;
     return this.requests.save(request);
   }

@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { CurrentUser, Public } from '@nestjs/authentication';
 import { ADMIN_ROLES, MANAGER_ROLES, Roles, RolesGuard } from '../auth/roles.js';
-import { User } from '../users/user.entity.js';
+import { User, UserRole } from '../users/user.entity.js';
 import { RequestsService, type RequestBody } from './requests.service.js';
 
 @Controller('requests')
@@ -26,19 +26,27 @@ export class RequestsController {
     return this.requests.create(body);
   }
 
-  /** The inbox: admins see everything, supervisors their stores only. */
+  /**
+   * The inbox: admins see everything, supervisors and users only the
+   * requests of the stores they're assigned to.
+   */
   @Get()
   @UseGuards(RolesGuard)
-  @Roles(...MANAGER_ROLES)
+  @Roles(...MANAGER_ROLES, UserRole.USER)
   findAll(@CurrentUser() caller: User, @Query('status') status?: string) {
     return this.requests.findAll(status, caller);
   }
 
+  /** Status changes: admins anywhere, supervisors on their own stores. */
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles(...ADMIN_ROLES)
-  setStatus(@Param('id') id: string, @Body('status') status: string) {
-    return this.requests.setStatus(id, status);
+  @Roles(...MANAGER_ROLES)
+  setStatus(
+    @Param('id') id: string,
+    @Body('status') status: string,
+    @CurrentUser() caller: User,
+  ) {
+    return this.requests.setStatus(id, status, caller);
   }
 
   @Delete(':id')
