@@ -44,25 +44,47 @@ interface ApiContest {
 type Tab = 'people' | 'requests' | 'calendar' | 'materials' | 'contest'
 const tab = ref<Tab>('people')
 const isSupervisor = computed(() => user.value?.role === 'supervisor')
-const allTabs: { id: Tab; label: string }[] = [
-  { id: 'people', label: 'People & Stores' },
-  { id: 'requests', label: 'Requests Inbox' },
-  { id: 'calendar', label: 'Calendar' },
-  { id: 'materials', label: 'Materials' },
-  { id: 'contest', label: 'Contest' },
-]
-// Supervisors manage people and see their stores' requests — content stays admin-only.
-const tabs = computed(() => (isSupervisor.value ? allTabs.slice(0, 2) : allTabs))
+const tabs = computed(() => {
+  const all: { id: Tab; label: string; icon: string; badge?: number }[] = [
+    { id: 'people', label: 'People & Stores', icon: 'users' },
+    { id: 'requests', label: 'Requests', icon: 'inbox', badge: openCount.value },
+    { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+    { id: 'materials', label: 'Materials', icon: 'box' },
+    { id: 'contest', label: 'Contest', icon: 'trophy' },
+  ]
+  // Supervisors manage people and see their stores' requests — content stays admin-only.
+  return isSupervisor.value ? all.slice(0, 2) : all
+})
 
 const loading = ref(true)
 const error = ref('')
 const toast = ref('')
+let toastTimer: ReturnType<typeof setTimeout>
 const flash = (msg: string) => {
   toast.value = msg
-  setTimeout(() => (toast.value = ''), 2500)
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (toast.value = ''), 2500)
 }
 const fail = (e: unknown) => {
   error.value = e instanceof Error ? e.message : 'Something went wrong'
+  setTimeout(() => (error.value = ''), 5000)
+}
+
+// Two-tap delete: first click arms, second confirms. Auto-disarms.
+const confirming = ref(new Set<string>())
+function askConfirm(key: string, fn: () => void | Promise<void>) {
+  if (confirming.value.has(key)) {
+    confirming.value.delete(key)
+    confirming.value = new Set(confirming.value)
+    void fn()
+    return
+  }
+  confirming.value.add(key)
+  confirming.value = new Set(confirming.value)
+  setTimeout(() => {
+    confirming.value.delete(key)
+    confirming.value = new Set(confirming.value)
+  }, 3000)
 }
 
 const stores = ref<ApiStore[]>([])
@@ -78,12 +100,22 @@ const roleLabels: Record<string, string> = {
   supervisor: 'Supervisor',
   user: 'User',
 }
+const roleBadge: Record<string, string> = {
+  super_admin: 'bg-violet-100 text-violet-700',
+  admin: 'bg-brand-100 text-brand-700',
+  supervisor: 'bg-amber-100 text-amber-700',
+  user: 'bg-slate-100 text-slate-600',
+}
 const roles = ['user', 'supervisor', 'admin', 'super_admin'] as const
-const requestStatuses = [
-  { value: 'new', label: 'New' },
-  { value: 'in_progress', label: 'In progress' },
-  { value: 'done', label: 'Done' },
-]
+
+const statusMeta: Record<string, { label: string; chip: string }> = {
+  new: { label: 'New', chip: 'bg-accent-100 text-accent-700' },
+  in_progress: { label: 'In progress', chip: 'bg-amber-100 text-amber-700' },
+  done: { label: 'Done', chip: 'bg-emerald-100 text-emerald-700' },
+}
+
+const initials = (name: string) =>
+  name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
 
 async function loadAll() {
   loading.value = true
@@ -116,9 +148,35 @@ async function loadAll() {
 }
 onMounted(loadAll)
 
+// ---------- stats strip ----------
+const openCount = computed(() => requests.value.filter((r) => r.status !== 'done').length)
+const stats = computed(() => [
+  { label: isSupervisor.value ? 'My stores' : 'Stores', value: stores.value.length, icon: 'store' },
+  { label: 'People', value: users.value.length, icon: 'users' },
+  { label: 'Open requests', value: openCount.value, icon: 'inbox', accent: openCount.value > 0 },
+  ...(isSupervisor.value
+    ? []
+    : [
+        { label: 'Campaigns', value: campaigns.value.length, icon: 'calendar' },
+        { label: 'Materials', value: materials.value.length, icon: 'box' },
+      ]),
+])
+
 // ---------- people ----------
 const newUser = reactive({ name: '', email: '', password: '', role: 'user' as string })
 const busy = ref(false)
+const showAddUser = ref(false)
+const search = ref('')
+const roleFilter = ref('all')
+
+const filteredUsers = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  return users.value.filter(
+    (u) =>
+      (roleFilter.value === 'all' || u.role === roleFilter.value) &&
+      (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)),
+  )
+})
 
 async function createUser() {
   busy.value = true
@@ -127,7 +185,8 @@ async function createUser() {
     const created = await apiPost<ApiUser>('/users', newUser)
     users.value.push(created)
     Object.assign(newUser, { name: '', email: '', password: '', role: 'user' })
-    flash('User created')
+    showAddUser.value = false
+    flash(`${created.name} added — they can sign in now`)
   } catch (e) {
     fail(e)
   } finally {
@@ -156,7 +215,6 @@ async function toggleActive(u: ApiUser) {
 }
 
 async function removeUser(u: ApiUser) {
-  if (!confirm(`Delete ${u.name} (${u.email})?`)) return
   try {
     await apiDelete(`/users/${u.id}`)
     users.value = users.value.filter((x) => x.id !== u.id)
@@ -178,7 +236,7 @@ async function assign(u: ApiUser) {
     })
     u.assignments.push({ id: a.id, store: a.store })
     assignPick[u.id] = ''
-    flash(`Store ${storeId} assigned`)
+    flash(`Store ${storeId} assigned to ${u.name}`)
   } catch (e) {
     fail(e)
   }
@@ -198,11 +256,24 @@ const assignable = (u: ApiUser) =>
   stores.value.filter((s) => !u.assignments.some((a) => a.store.id === s.id))
 
 // ---------- requests ----------
+const reqFilter = ref<'all' | 'new' | 'in_progress' | 'done'>('all')
+const reqCounts = computed(() => ({
+  all: requests.value.length,
+  new: requests.value.filter((r) => r.status === 'new').length,
+  in_progress: requests.value.filter((r) => r.status === 'in_progress').length,
+  done: requests.value.filter((r) => r.status === 'done').length,
+}))
+const filteredRequests = computed(() =>
+  reqFilter.value === 'all'
+    ? requests.value
+    : requests.value.filter((r) => r.status === reqFilter.value),
+)
+
 async function setRequestStatus(r: ApiRequest, status: string) {
   try {
     const updated = await apiPatch<ApiRequest>(`/requests/${r.id}`, { status })
     Object.assign(r, updated)
-    flash('Status updated')
+    flash(`Request ${statusMeta[status]?.label ?? status}`)
   } catch (e) {
     fail(e)
   }
@@ -217,12 +288,9 @@ async function removeRequest(r: ApiRequest) {
   }
 }
 
-const openRequests = computed(() => requests.value.filter((r) => r.status !== 'done'))
-const doneRequests = computed(() => requests.value.filter((r) => r.status === 'done'))
-
 // ---------- calendar ----------
 const blankCampaign = () => ({
-  id: '' as string | '',
+  id: '',
   title: '',
   startDate: '',
   endDate: '',
@@ -231,9 +299,15 @@ const blankCampaign = () => ({
 })
 const campaignForm = reactive(blankCampaign())
 const campaignEditing = computed(() => campaignForm.id !== '')
+const showCampaignForm = ref(false)
+const sortedCampaigns = computed(() =>
+  [...campaigns.value].sort((a, b) => a.startDate.localeCompare(b.startDate)),
+)
 
 function editCampaign(c: ApiCampaign) {
   Object.assign(campaignForm, { ...c })
+  showCampaignForm.value = true
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 async function saveCampaign() {
   error.value = ''
@@ -249,12 +323,12 @@ async function saveCampaign() {
       flash('Campaign added')
     }
     Object.assign(campaignForm, blankCampaign())
+    showCampaignForm.value = false
   } catch (e) {
     fail(e)
   }
 }
 async function removeCampaign(c: ApiCampaign) {
-  if (!confirm(`Delete "${c.title}"?`)) return
   try {
     await apiDelete(`/campaigns/${c.id}`)
     campaigns.value = campaigns.value.filter((x) => x.id !== c.id)
@@ -272,11 +346,20 @@ const blankMaterial = () => ({
   category: 'signage',
 })
 const materialForm = reactive(blankMaterial())
+const showMaterialForm = ref(false)
+const materialFilter = ref('all')
+const filteredMaterials = computed(() =>
+  materialFilter.value === 'all'
+    ? materials.value
+    : materials.value.filter((m) => m.category === materialFilter.value),
+)
 
 function editMaterial(m: ApiMaterial) {
   Object.assign(materialForm, {
     id: m.id, name: m.name, detail: m.detail, leadTime: m.leadTime, category: m.category,
   })
+  showMaterialForm.value = true
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 async function saveMaterial() {
   error.value = ''
@@ -292,6 +375,7 @@ async function saveMaterial() {
       flash('Material added')
     }
     Object.assign(materialForm, blankMaterial())
+    showMaterialForm.value = false
   } catch (e) {
     fail(e)
   }
@@ -300,12 +384,12 @@ async function toggleMaterial(m: ApiMaterial) {
   try {
     const updated = await apiPatch<ApiMaterial>(`/materials/${m.id}`, { isActive: !m.isActive })
     Object.assign(m, updated)
+    flash(updated.isActive ? `${m.name} visible` : `${m.name} hidden`)
   } catch (e) {
     fail(e)
   }
 }
 async function removeMaterial(m: ApiMaterial) {
-  if (!confirm(`Delete "${m.name}"?`)) return
   try {
     await apiDelete(`/materials/${m.id}`)
     materials.value = materials.value.filter((x) => x.id !== m.id)
@@ -320,12 +404,15 @@ const entryForm = reactive({
   upsellRate: '' as number | '', qualifyingOrders: '' as number | '',
   trend: 'same' as 'up' | 'down' | 'same',
 })
+const showEntryForm = ref(false)
 
 function editEntry(e: ApiEntry) {
   Object.assign(entryForm, {
     id: e.id, storeId: e.store.id, manager: e.manager,
     upsellRate: Number(e.upsellRate), qualifyingOrders: e.qualifyingOrders, trend: e.trend,
   })
+  showEntryForm.value = true
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 async function saveEntry() {
   error.value = ''
@@ -353,6 +440,7 @@ async function saveEntry() {
     }
     contest.value?.entries.sort((a, b) => Number(b.upsellRate) - Number(a.upsellRate))
     Object.assign(entryForm, { id: '', storeId: '', manager: '', upsellRate: '', qualifyingOrders: '', trend: 'same' })
+    showEntryForm.value = false
   } catch (e) {
     fail(e)
   }
@@ -368,188 +456,263 @@ async function removeEntry(e: ApiEntry) {
 
 const fmtDate = (iso: string | null) =>
   iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '—'
+const fmtRange = (start: string, end: string) => `${fmtDate(start)} – ${fmtDate(end)}`
+
 const input =
-  'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-200'
+  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-200'
 const btn =
   'rounded-full bg-brand-600 px-5 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:opacity-40'
+const ghostBtn =
+  'rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-400'
+const confirmBtn = (key: string) =>
+  confirming.value.has(key)
+    ? 'rounded-full bg-accent-500 px-3 py-1.5 text-xs font-bold text-white'
+    : 'rounded-full px-3 py-1.5 text-xs font-bold text-accent-600 transition hover:bg-accent-50'
 </script>
 
 <template>
   <PageHeader
     eyebrow="Dashboard"
     title="Administration"
-    :description="`Signed in as ${user?.name} — ${roleLabels[user?.role ?? ''] ?? ''}. Manage people, store access, and all portal content.`"
+    :description="`Signed in as ${user?.name} — ${roleLabels[user?.role ?? ''] ?? ''}.`"
   />
 
-  <section class="mx-auto max-w-7xl px-4 py-10 sm:px-6">
+  <section class="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+    <!-- Stats strip -->
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div
+        v-for="s in stats"
+        :key="s.label"
+        class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+      >
+        <p class="font-display text-2xl font-extrabold" :class="s.accent ? 'text-accent-600' : 'text-slate-900'">
+          {{ s.value }}
+        </p>
+        <p class="mt-0.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">{{ s.label }}</p>
+      </div>
+    </div>
+
     <!-- Tabs -->
-    <div class="flex flex-wrap gap-2">
+    <div class="mt-6 flex flex-wrap gap-2">
       <button
         v-for="t in tabs"
         :key="t.id"
         :class="[
-          'rounded-full px-5 py-2 text-sm font-semibold transition',
+          'flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition',
           tab === t.id
             ? 'bg-brand-600 text-white shadow-md'
             : 'border border-slate-300 bg-white text-slate-600 hover:border-brand-400 hover:text-brand-600',
         ]"
         @click="tab = t.id"
       >
+        <svg v-if="t.icon === 'users'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <svg v-else-if="t.icon === 'inbox'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        <svg v-else-if="t.icon === 'calendar'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        <svg v-else-if="t.icon === 'box'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+        <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 21h8m-4-4v4M7 4h10v5a5 5 0 0 1-10 0V4zm10 1h3a2 2 0 0 1-2 4h-1M7 5H4a2 2 0 0 0 2 4h1"/></svg>
         {{ t.label }}
+        <span
+          v-if="t.badge"
+          class="rounded-full bg-accent-500 px-2 py-0.5 text-[11px] font-extrabold text-white"
+        >
+          {{ t.badge }}
+        </span>
       </button>
     </div>
 
-    <p v-if="error" class="mt-5 rounded-xl border border-accent-500/30 bg-accent-50 p-4 text-sm font-semibold text-accent-600">
-      {{ error }}
-    </p>
-    <p v-if="toast" class="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
-      {{ toast }}
-    </p>
-    <p v-if="loading" class="mt-10 text-center text-sm text-slate-500">Loading dashboard…</p>
+    <p v-if="loading" class="mt-14 text-center text-sm text-slate-500">Loading dashboard…</p>
 
     <!-- ==================== PEOPLE ==================== -->
-    <div v-else-if="tab === 'people'" class="mt-8 space-y-6">
+    <div v-else-if="tab === 'people'" class="mt-8 space-y-5">
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="relative min-w-56 flex-1">
+          <svg class="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input v-model="search" :class="[input, '!pl-10']" type="search" placeholder="Search name or email…" />
+        </div>
+        <div class="flex gap-1.5">
+          <button
+            v-for="r in ['all', ...roles]"
+            :key="r"
+            :class="[
+              'rounded-full px-3.5 py-1.5 text-xs font-bold transition',
+              roleFilter === r ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+            ]"
+            @click="roleFilter = r"
+          >
+            {{ r === 'all' ? 'All' : roleLabels[r] }}
+          </button>
+        </div>
+        <button :class="btn" class="ml-auto" @click="showAddUser = !showAddUser">
+          {{ showAddUser ? '− Close' : '+ Add person' }}
+        </button>
+      </div>
+
       <!-- Add person -->
       <form
-        class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-5"
+        v-if="showAddUser"
+        class="grid gap-4 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-5"
         @submit.prevent="createUser"
       >
-        <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-5">Add a person</h3>
+        <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-5">
+          New {{ isSupervisor ? 'store user' : 'account' }}
+        </h3>
         <input v-model="newUser.name" :class="input" placeholder="Full name" required />
         <input v-model="newUser.email" :class="input" type="email" placeholder="Email" required />
         <input v-model="newUser.password" :class="input" type="password" placeholder="Password (8+ chars)" required minlength="8" />
         <select v-if="!isSupervisor" v-model="newUser.role" :class="input">
           <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
         </select>
-        <span v-else :class="[input, 'bg-slate-50 text-slate-500']">Role: User</span>
-        <button :class="btn" :disabled="busy" type="submit">Add person</button>
+        <span v-else :class="[input, 'bg-slate-100 text-slate-500']">Role: User</span>
+        <button :class="btn" :disabled="busy" type="submit">{{ busy ? 'Adding…' : 'Add person' }}</button>
       </form>
 
-      <!-- Users table -->
-      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div
-          v-for="u in users"
-          :key="u.id"
-          class="border-b border-slate-100 p-5 last:border-b-0"
-        >
-          <div class="flex flex-wrap items-center gap-3">
-            <div class="min-w-52 flex-1">
-              <p class="font-display font-bold text-slate-900">{{ u.name }}</p>
-              <p class="text-xs text-slate-500">{{ u.email }}</p>
-            </div>
+      <!-- Users -->
+      <div v-if="!filteredUsers.length" class="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">
+        No people match your filters.
+      </div>
+      <div
+        v-for="u in filteredUsers"
+        :key="u.id"
+        class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-600 font-display text-sm font-extrabold text-white">
+            {{ initials(u.name) }}
+          </span>
+          <div class="min-w-44 flex-1">
+            <p class="font-display font-bold text-slate-900">{{ u.name }}</p>
+            <p class="text-xs text-slate-500">{{ u.email }}</p>
+          </div>
+          <span :class="['rounded-full px-3 py-1 text-xs font-bold', roleBadge[u.role]]">
+            {{ roleLabels[u.role] }}
+          </span>
+          <span v-if="!u.isActive" class="rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-500">
+            Disabled
+          </span>
 
+          <template v-if="!isSupervisor">
             <select
-              v-if="!isSupervisor"
-              :class="[input, 'w-36']"
+              :class="[input, 'w-32 !py-1.5 text-xs']"
               :value="u.role"
               :disabled="u.role === 'super_admin' && user?.role !== 'super_admin'"
+              title="Change role"
               @change="setRole(u, ($event.target as HTMLSelectElement).value)"
             >
               <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
             </select>
-            <span v-else class="w-28 rounded-full bg-slate-100 px-3 py-1.5 text-center text-xs font-bold text-slate-600">
-              {{ roleLabels[u.role] }}
-            </span>
-
-            <template v-if="!isSupervisor">
-              <button
-                :class="[
-                  'rounded-full px-4 py-1.5 text-xs font-bold transition',
-                  u.isActive
-                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                    : 'bg-slate-200 text-slate-500 hover:bg-slate-300',
-                ]"
-                @click="toggleActive(u)"
-              >
-                {{ u.isActive ? 'Active' : 'Disabled' }}
-              </button>
-              <button
-                class="rounded-full px-4 py-1.5 text-xs font-bold text-accent-600 transition hover:bg-accent-50"
-                @click="removeUser(u)"
-              >
-                Delete
-              </button>
-            </template>
-          </div>
-
-          <!-- Store assignments -->
-          <div
-            v-if="u.role === 'user' || u.role === 'supervisor'"
-            class="mt-3 flex flex-wrap items-center gap-2"
-          >
-            <span class="text-xs font-bold tracking-wide text-slate-400 uppercase">Stores:</span>
-            <span
-              v-for="a in u.assignments"
-              :key="a.id"
-              class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700"
+            <button
+              :class="ghostBtn + ' !px-3 !py-1.5 text-xs'"
+              :title="u.isActive ? 'Deactivate account' : 'Activate account'"
+              @click="toggleActive(u)"
             >
-              {{ a.store.id }}
-              <button
-                class="text-brand-400 transition hover:text-accent-600"
-                title="Remove assignment"
-                @click="unassign(u, a)"
-              >
-                ×
-              </button>
-            </span>
-            <span v-if="!u.assignments.length" class="text-xs text-slate-400">none yet</span>
-
-            <span v-if="u.role === 'supervisor' || !u.assignments.length" class="flex items-center gap-1.5">
-              <select v-model="assignPick[u.id]" :class="[input, 'w-36 !py-1 text-xs']">
-                <option value="" disabled>+ assign store</option>
-                <option v-for="s in assignable(u)" :key="s.id" :value="s.id">
-                  {{ s.id }} — {{ s.name }}
-                </option>
-              </select>
-              <button class="text-xs font-bold text-brand-600 hover:text-brand-800" @click="assign(u)">
-                Assign
-              </button>
-            </span>
-            <span v-else class="text-[11px] text-slate-400">(users are limited to one store)</span>
-          </div>
-          <p v-else class="mt-3 text-xs text-slate-400">
-            {{ roleLabels[u.role] }}s see all stores — no assignment needed.
-          </p>
+              {{ u.isActive ? 'Disable' : 'Enable' }}
+            </button>
+            <button :class="confirmBtn(`u-${u.id}`)" @click="askConfirm(`u-${u.id}`, () => removeUser(u))">
+              {{ confirming.has(`u-${u.id}`) ? 'Confirm delete' : 'Delete' }}
+            </button>
+          </template>
         </div>
+
+        <!-- Store assignments -->
+        <div
+          v-if="u.role === 'user' || u.role === 'supervisor'"
+          class="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4"
+        >
+          <span class="text-xs font-bold tracking-wide text-slate-400 uppercase">Stores</span>
+          <span
+            v-for="a in u.assignments"
+            :key="a.id"
+            class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700"
+          >
+            {{ a.store.id }} · {{ a.store.name }}
+            <button
+              class="text-brand-400 transition hover:text-accent-600"
+              title="Remove assignment"
+              @click="unassign(u, a)"
+            >
+              ×
+            </button>
+          </span>
+          <span v-if="!u.assignments.length" class="text-xs text-slate-400">no store yet</span>
+
+          <span v-if="u.role === 'supervisor' || !u.assignments.length" class="flex items-center gap-1.5">
+            <select v-model="assignPick[u.id]" :class="[input, 'w-44 !py-1.5 text-xs']">
+              <option value="" disabled>Assign a store…</option>
+              <option v-for="s in assignable(u)" :key="s.id" :value="s.id">
+                {{ s.id }} — {{ s.name }}
+              </option>
+            </select>
+            <button
+              class="rounded-full bg-brand-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-700 disabled:opacity-40"
+              :disabled="!assignPick[u.id]"
+              @click="assign(u)"
+            >
+              Assign
+            </button>
+          </span>
+          <span v-else class="text-[11px] text-slate-400">(users are limited to one store)</span>
+        </div>
+        <p v-else class="mt-4 border-t border-slate-100 pt-4 text-xs text-slate-400">
+          {{ roleLabels[u.role] }}s see all stores — no assignment needed.
+        </p>
       </div>
     </div>
 
     <!-- ==================== REQUESTS ==================== -->
     <div v-else-if="tab === 'requests'" class="mt-8 space-y-4">
-      <p class="text-sm text-slate-500">
-        {{ openRequests.length }} open · {{ doneRequests.length }} done
-      </p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="f in (['all', 'new', 'in_progress', 'done'] as const)"
+          :key="f"
+          :class="[
+            'rounded-full px-4 py-1.5 text-xs font-bold transition',
+            reqFilter === f ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+          ]"
+          @click="reqFilter = f"
+        >
+          {{ f === 'all' ? 'All' : statusMeta[f]!.label }} · {{ reqCounts[f] }}
+        </button>
+      </div>
+
+      <div v-if="!filteredRequests.length" class="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">
+        Nothing here — new submissions from the request form will land in this inbox.
+      </div>
       <div
-        v-for="r in requests"
+        v-for="r in filteredRequests"
         :key="r.id"
         class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
         :class="r.status === 'done' && 'opacity-60'"
       >
         <div class="flex flex-wrap items-center gap-3">
           <p class="font-display font-bold text-brand-800">Store {{ r.store.id }} — {{ r.store.name }}</p>
-          <span class="text-xs text-slate-400">{{ fmtDate(r.createdAt.slice(0, 10)) }}</span>
-          <select
-            v-if="!isSupervisor"
-            :class="[input, 'ml-auto w-36 !py-1.5 text-xs']"
-            :value="r.status"
-            @change="setRequestStatus(r, ($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="s in requestStatuses" :key="s.value" :value="s.value">{{ s.label }}</option>
-          </select>
-          <span
-            v-else
-            class="ml-auto rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600"
-          >
-            {{ requestStatuses.find((s) => s.value === r.status)?.label ?? r.status }}
+          <span :class="['rounded-full px-3 py-1 text-xs font-bold', statusMeta[r.status]?.chip]">
+            {{ statusMeta[r.status]?.label ?? r.status }}
           </span>
-          <button
-            v-if="!isSupervisor"
-            class="text-xs font-bold text-accent-600 hover:underline"
-            @click="removeRequest(r)"
-          >
-            Delete
-          </button>
+          <span class="text-xs text-slate-400">{{ fmtDate(r.createdAt.slice(0, 10)) }}</span>
+
+          <template v-if="!isSupervisor">
+            <span class="ml-auto flex gap-2">
+              <button
+                v-if="r.status === 'new'"
+                :class="ghostBtn + ' !px-3 !py-1.5 text-xs !border-amber-400 !text-amber-700'"
+                @click="setRequestStatus(r, 'in_progress')"
+              >
+                Start work
+              </button>
+              <button
+                v-if="r.status !== 'done'"
+                class="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-700"
+                @click="setRequestStatus(r, 'done')"
+              >
+                Mark done
+              </button>
+              <button :class="confirmBtn(`r-${r.id}`)" @click="askConfirm(`r-${r.id}`, () => removeRequest(r))">
+                {{ confirming.has(`r-${r.id}`) ? 'Confirm' : 'Delete' }}
+              </button>
+            </span>
+          </template>
         </div>
+
         <div class="mt-3 flex flex-wrap gap-2">
           <span
             v-for="i in r.items"
@@ -565,17 +728,24 @@ const btn =
           <span v-if="r.notes" class="sm:col-span-3"><b>Notes:</b> {{ r.notes }}</span>
         </p>
       </div>
-      <p v-if="!requests.length" class="text-sm text-slate-500">No requests yet.</p>
     </div>
 
     <!-- ==================== CALENDAR ==================== -->
-    <div v-else-if="tab === 'calendar'" class="mt-8 space-y-6">
+    <div v-else-if="tab === 'calendar'" class="mt-8 space-y-5">
+      <div class="flex items-center justify-between">
+        <p class="text-sm text-slate-500">{{ campaigns.length }} campaigns — changes go live on the public calendar immediately.</p>
+        <button :class="btn" @click="showCampaignForm = !showCampaignForm">
+          {{ showCampaignForm ? '− Close' : '+ Add campaign' }}
+        </button>
+      </div>
+
       <form
-        class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-2"
+        v-if="showCampaignForm"
+        class="grid gap-4 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-2"
         @submit.prevent="saveCampaign"
       >
         <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-2">
-          {{ campaignEditing ? 'Edit campaign' : 'Add campaign' }}
+          {{ campaignEditing ? 'Edit campaign' : 'New campaign' }}
         </h3>
         <input v-model="campaignForm.title" :class="input" placeholder="Title" required />
         <select v-model="campaignForm.type" :class="input">
@@ -589,14 +759,14 @@ const btn =
           <label class="text-xs font-bold text-slate-500">End</label>
           <input v-model="campaignForm.endDate" :class="input" type="date" required />
         </div>
-        <textarea v-model="campaignForm.description" :class="input" rows="2" placeholder="Description" class="sm:col-span-2" required />
+        <textarea v-model="campaignForm.description" :class="[input, 'sm:col-span-2']" rows="2" placeholder="Description" required />
         <div class="flex gap-3 sm:col-span-2">
           <button :class="btn" type="submit">{{ campaignEditing ? 'Save changes' : 'Add campaign' }}</button>
           <button
             v-if="campaignEditing"
             type="button"
-            class="rounded-full border border-slate-300 px-5 py-2 text-sm font-semibold text-slate-600"
-            @click="Object.assign(campaignForm, blankCampaign())"
+            :class="ghostBtn"
+            @click="Object.assign(campaignForm, blankCampaign()); showCampaignForm = false"
           >
             Cancel
           </button>
@@ -605,31 +775,46 @@ const btn =
 
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div
-          v-for="c in campaigns"
+          v-for="c in sortedCampaigns"
           :key="c.id"
           class="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4 last:border-b-0"
         >
+          <span :class="['h-8 w-1.5 shrink-0 rounded-full', campaignTypes[c.type].dot]" />
           <span :class="['rounded-full px-3 py-1 text-xs font-bold', campaignTypes[c.type].chip]">
             {{ campaignTypes[c.type].label }}
           </span>
           <div class="min-w-52 flex-1">
             <p class="font-semibold text-slate-900">{{ c.title }}</p>
-            <p class="text-xs text-slate-500">{{ fmtDate(c.startDate) }} – {{ fmtDate(c.endDate) }}</p>
+            <p class="text-xs text-slate-500">{{ fmtRange(c.startDate, c.endDate) }}</p>
           </div>
-          <button class="text-xs font-bold text-brand-600 hover:underline" @click="editCampaign(c)">Edit</button>
-          <button class="text-xs font-bold text-accent-600 hover:underline" @click="removeCampaign(c)">Delete</button>
+          <button :class="ghostBtn + ' !px-3 !py-1.5 text-xs'" @click="editCampaign(c)">Edit</button>
+          <button :class="confirmBtn(`c-${c.id}`)" @click="askConfirm(`c-${c.id}`, () => removeCampaign(c))">
+            {{ confirming.has(`c-${c.id}`) ? 'Confirm' : 'Delete' }}
+          </button>
         </div>
       </div>
     </div>
 
     <!-- ==================== MATERIALS ==================== -->
-    <div v-else-if="tab === 'materials'" class="mt-8 space-y-6">
+    <div v-else-if="tab === 'materials'" class="mt-8 space-y-5">
+      <div class="flex flex-wrap items-center gap-3">
+        <select v-model="materialFilter" :class="[input, 'w-48']">
+          <option value="all">All categories</option>
+          <option v-for="c in materialCategories" :key="c.slug" :value="c.slug">{{ c.name }}</option>
+        </select>
+        <p class="text-sm text-slate-500">{{ filteredMaterials.length }} items</p>
+        <button :class="btn" class="ml-auto" @click="showMaterialForm = !showMaterialForm">
+          {{ showMaterialForm ? '− Close' : '+ Add material' }}
+        </button>
+      </div>
+
       <form
-        class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-2"
+        v-if="showMaterialForm"
+        class="grid gap-4 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-2"
         @submit.prevent="saveMaterial"
       >
         <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-2">
-          {{ materialForm.id ? 'Edit material' : 'Add material' }}
+          {{ materialForm.id ? 'Edit material' : 'New material' }}
         </h3>
         <input v-model="materialForm.name" :class="input" placeholder="Name" required />
         <select v-model="materialForm.category" :class="input">
@@ -642,8 +827,8 @@ const btn =
           <button
             v-if="materialForm.id"
             type="button"
-            class="rounded-full border border-slate-300 px-5 py-2 text-sm font-semibold text-slate-600"
-            @click="Object.assign(materialForm, blankMaterial())"
+            :class="ghostBtn"
+            @click="Object.assign(materialForm, blankMaterial()); showMaterialForm = false"
           >
             Cancel
           </button>
@@ -652,7 +837,7 @@ const btn =
 
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div
-          v-for="m in materials"
+          v-for="m in filteredMaterials"
           :key="m.id"
           class="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4 last:border-b-0"
           :class="!m.isActive && 'opacity-50'"
@@ -664,23 +849,36 @@ const btn =
             <p class="font-semibold text-slate-900">{{ m.name }}</p>
             <p class="text-xs text-slate-500">{{ m.detail }} · ~{{ m.leadTime }}</p>
           </div>
-          <button class="text-xs font-bold text-slate-600 hover:underline" @click="toggleMaterial(m)">
+          <button :class="ghostBtn + ' !px-3 !py-1.5 text-xs'" @click="toggleMaterial(m)">
             {{ m.isActive ? 'Hide' : 'Show' }}
           </button>
-          <button class="text-xs font-bold text-brand-600 hover:underline" @click="editMaterial(m)">Edit</button>
-          <button class="text-xs font-bold text-accent-600 hover:underline" @click="removeMaterial(m)">Delete</button>
+          <button :class="ghostBtn + ' !px-3 !py-1.5 text-xs'" @click="editMaterial(m)">Edit</button>
+          <button :class="confirmBtn(`m-${m.id}`)" @click="askConfirm(`m-${m.id}`, () => removeMaterial(m))">
+            {{ confirming.has(`m-${m.id}`) ? 'Confirm' : 'Delete' }}
+          </button>
         </div>
       </div>
     </div>
 
     <!-- ==================== CONTEST ==================== -->
-    <div v-else-if="tab === 'contest' && contest" class="mt-8 space-y-6">
+    <div v-else-if="tab === 'contest' && contest" class="mt-8 space-y-5">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="font-display font-bold text-slate-900">{{ contest.title }}</p>
+          <p class="text-sm text-slate-500">{{ fmtRange(contest.startDate, contest.endDate) }} · {{ contest.entries.length }} stores on the board</p>
+        </div>
+        <button :class="btn" @click="showEntryForm = !showEntryForm">
+          {{ showEntryForm ? '− Close' : '+ Add entry' }}
+        </button>
+      </div>
+
       <form
-        class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-6"
+        v-if="showEntryForm"
+        class="grid gap-4 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-6"
         @submit.prevent="saveEntry"
       >
         <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-6">
-          {{ entryForm.id ? 'Edit leaderboard entry' : 'Add leaderboard entry' }}
+          {{ entryForm.id ? 'Edit leaderboard entry' : 'New leaderboard entry' }}
         </h3>
         <select v-model="entryForm.storeId" :class="[input, 'sm:col-span-2']" :disabled="!!entryForm.id" required>
           <option value="" disabled>Store</option>
@@ -699,8 +897,8 @@ const btn =
           <button
             v-if="entryForm.id"
             type="button"
-            class="rounded-full border border-slate-300 px-5 py-2 text-sm font-semibold text-slate-600"
-            @click="Object.assign(entryForm, { id: '', storeId: '', manager: '', upsellRate: '', qualifyingOrders: '', trend: 'same' })"
+            :class="ghostBtn"
+            @click="Object.assign(entryForm, { id: '', storeId: '', manager: '', upsellRate: '', qualifyingOrders: '', trend: 'same' }); showEntryForm = false"
           >
             Cancel
           </button>
@@ -713,17 +911,57 @@ const btn =
           :key="e.id"
           class="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4 last:border-b-0"
         >
-          <span class="w-7 text-center font-display font-extrabold text-slate-400">{{ i + 1 }}</span>
+          <span
+            :class="[
+              'flex h-8 w-8 items-center justify-center rounded-full font-display text-sm font-extrabold',
+              i === 0 ? 'bg-gold-400 text-white' : i < 3 ? 'bg-slate-200 text-slate-600' : 'text-slate-400',
+            ]"
+          >
+            {{ i + 1 }}
+          </span>
           <div class="min-w-52 flex-1">
             <p class="font-semibold text-slate-900">Store {{ e.store.id }} — {{ e.store.name }}</p>
             <p class="text-xs text-slate-500">{{ e.manager }}</p>
           </div>
           <p class="font-display text-lg font-extrabold text-slate-900">{{ Number(e.upsellRate) }}%</p>
-          <p class="w-24 text-xs text-slate-500">{{ e.qualifyingOrders }} orders · {{ e.trend }}</p>
-          <button class="text-xs font-bold text-brand-600 hover:underline" @click="editEntry(e)">Edit</button>
-          <button class="text-xs font-bold text-accent-600 hover:underline" @click="removeEntry(e)">Delete</button>
+          <p class="w-28 text-xs text-slate-500">{{ e.qualifyingOrders }} orders · {{ e.trend }}</p>
+          <button :class="ghostBtn + ' !px-3 !py-1.5 text-xs'" @click="editEntry(e)">Edit</button>
+          <button :class="confirmBtn(`e-${e.id}`)" @click="askConfirm(`e-${e.id}`, () => removeEntry(e))">
+            {{ confirming.has(`e-${e.id}`) ? 'Confirm' : 'Delete' }}
+          </button>
         </div>
       </div>
     </div>
+
+    <!-- Floating toast + error -->
+    <Transition name="toast">
+      <div
+        v-if="toast"
+        class="fixed right-5 bottom-5 z-50 flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-xl"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+        {{ toast }}
+      </div>
+    </Transition>
+    <Transition name="toast">
+      <div
+        v-if="error"
+        class="fixed right-5 bottom-5 z-50 max-w-sm rounded-2xl bg-accent-600 px-5 py-3 text-sm font-bold text-white shadow-xl"
+      >
+        {{ error }}
+      </div>
+    </Transition>
   </section>
 </template>
+
+<style scoped>
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.25s ease;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+</style>
