@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import DominoLogo from '@/components/DominoLogo.vue'
-import { apiGet } from '@/lib/api'
+import { apiGet, apiGetNullable } from '@/lib/api'
 
 interface HomeContest {
   title: string
@@ -64,7 +64,7 @@ const fmtContestDate = (date: string) =>
 
 async function loadCurrentContest() {
   try {
-    contest.value = await apiGet<HomeContest | null>('/contest')
+    contest.value = await apiGetNullable<HomeContest>('/contest')
   } catch (e) {
     contestError.value = e instanceof Error ? e.message : 'Contest information is unavailable'
   } finally {
@@ -84,7 +84,7 @@ async function loadCalendarEvents() {
 
 async function loadLastContest() {
   try {
-    lastContest.value = await apiGet<CompletedContest | null>('/contest/winners/latest')
+    lastContest.value = await apiGetNullable<CompletedContest>('/contest/winners/latest')
   } catch (e) {
     lastContestError.value = e instanceof Error ? e.message : 'Contest winners are unavailable'
   } finally {
@@ -441,6 +441,12 @@ const steps = [
       </h2>
       <p class="mt-3 text-slate-600">
         {{ contestError || 'Check back soon for the next event and leaderboard.' }}
+      </p>
+      <p
+        v-if="!contestLoading && !contestError && !campaignsLoading && !campaignsError && upcomingEvents.length"
+        class="mt-4 text-sm font-semibold text-brand-700"
+      >
+        Next calendar event: {{ upcomingEvents[0]!.title }} · {{ fmtContestDate(upcomingEvents[0]!.startDate) }}
       </p>
       <span class="mt-5 inline-flex items-center gap-2 text-sm font-bold text-brand-600">
         Visit contest page

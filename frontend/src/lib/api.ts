@@ -10,7 +10,11 @@ function token(): string | null {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  emptyResponseIsNull = false,
+): Promise<T> {
   const t = token()
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -25,10 +29,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(body?.message ?? `${res.status} ${res.statusText}`)
   }
   if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
+  const body = await res.text()
+  if (!body.trim() && emptyResponseIsNull) return null as T
+  return JSON.parse(body) as T
 }
 
 export const apiGet = <T>(path: string) => request<T>(path)
+export const apiGetNullable = <T>(path: string) => request<T | null>(path, undefined, true)
 
 export const apiPost = <T>(path: string, body: unknown) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) })

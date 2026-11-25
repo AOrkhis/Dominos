@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import { apiGet } from '@/lib/api'
+import { apiGetNullable } from '@/lib/api'
 
 interface ApiContest {
   title: string
@@ -27,7 +27,7 @@ const error = ref('')
 
 onMounted(async () => {
   try {
-    contest.value = await apiGet<ApiContest | null>('/contest')
+    contest.value = await apiGetNullable<ApiContest>('/contest')
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Contest information is unavailable'
   } finally {
