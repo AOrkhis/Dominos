@@ -26,6 +26,13 @@ export class ContestsController {
     return this.contests.getActive();
   }
 
+  @Post()
+  @UseGuards(RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  create(@Body() body: ContestBody) {
+    return this.contests.create(body);
+  }
+
   @Patch()
   @UseGuards(RolesGuard)
   @Roles(...ADMIN_ROLES)

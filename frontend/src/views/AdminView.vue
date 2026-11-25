@@ -410,6 +410,38 @@ async function removeMaterial(m: ApiMaterial) {
 }
 
 // ---------- contest ----------
+const blankContest = () => ({
+  title: '',
+  description: '',
+  startDate: '',
+  endDate: '',
+  teamPrize: '',
+  managerPrize: '',
+})
+const contestForm = reactive(blankContest())
+const showContestForm = ref(false)
+
+async function saveContestEvent() {
+  error.value = ''
+  try {
+    const created = await apiPost<ApiContest>('/contest', {
+      title: contestForm.title,
+      intro: contestForm.description,
+      startDate: contestForm.startDate,
+      endDate: contestForm.endDate,
+      teamPrize: contestForm.teamPrize,
+      storePrize: contestForm.managerPrize,
+      product: 'Upsell',
+    })
+    contest.value = created.entries ? created : { ...created, entries: [] }
+    Object.assign(contestForm, blankContest())
+    showContestForm.value = false
+    flash('Contest event is live')
+  } catch (e) {
+    fail(e)
+  }
+}
+
 const entryForm = reactive({
   id: '', storeId: '' as number | '', manager: '',
   upsellRate: '' as number | '', qualifyingOrders: '' as number | '',
@@ -877,10 +909,43 @@ const confirmBtn = (key: string) =>
           <p class="font-display font-bold text-slate-900">{{ contest.title }}</p>
           <p class="text-sm text-slate-500">{{ fmtRange(contest.startDate, contest.endDate) }} · {{ contest.entries.length }} stores on the board</p>
         </div>
-        <button :class="btn" @click="showEntryForm = !showEntryForm">
-          {{ showEntryForm ? '− Close' : '+ Add entry' }}
-        </button>
+        <div class="flex gap-2">
+          <button :class="btn" @click="showContestForm = !showContestForm">
+            {{ showContestForm ? '− Close' : '+ Add event' }}
+          </button>
+          <button :class="ghostBtn" @click="showEntryForm = !showEntryForm">
+            {{ showEntryForm ? '− Close' : '+ Add entry' }}
+          </button>
+        </div>
       </div>
+
+      <form
+        v-if="showContestForm"
+        class="grid gap-4 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-2"
+        @submit.prevent="saveContestEvent"
+      >
+        <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-2">
+          New contest event
+        </h3>
+        <input v-model="contestForm.title" :class="[input, 'sm:col-span-2']" placeholder="Event title" required />
+        <textarea v-model="contestForm.description" :class="[input, 'sm:col-span-2']" rows="3" placeholder="Description" required />
+        <div>
+          <label class="text-xs font-bold text-slate-500">Start date</label>
+          <input v-model="contestForm.startDate" :class="input" type="date" required />
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-500">End date</label>
+          <input v-model="contestForm.endDate" :class="input" type="date" required />
+        </div>
+        <input v-model="contestForm.teamPrize" :class="input" placeholder="Team prize" required />
+        <input v-model="contestForm.managerPrize" :class="input" placeholder="Manager prize" required />
+        <div class="flex gap-3 sm:col-span-2">
+          <button :class="btn" type="submit">Publish event</button>
+          <button type="button" :class="ghostBtn" @click="Object.assign(contestForm, blankContest()); showContestForm = false">
+            Cancel
+          </button>
+        </div>
+      </form>
 
       <form
         v-if="showEntryForm"

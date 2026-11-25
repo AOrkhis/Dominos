@@ -98,13 +98,11 @@ const fmtDate = (iso: string) =>
           <path d="M8 21h8m-4-4v4M7 4h10v5a5 5 0 0 1-10 0V4zm10 1h3a2 2 0 0 1-2 4h-1M7 5H4a2 2 0 0 0 2 4h1" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" />
         </svg>
         <p class="text-xs font-bold tracking-[0.25em] text-white/80 uppercase">Team Prize</p>
-        <p class="font-display mt-3 text-4xl font-extrabold">$50 × 10</p>
-        <p class="mt-3 max-w-sm text-sm leading-relaxed text-white/90">{{ contest.teamPrize }}</p>
+        <p class="font-display mt-3 max-w-sm text-2xl font-extrabold leading-snug">{{ contest.teamPrize }}</p>
       </div>
       <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 to-brand-900 p-8 text-white shadow-lg">
-        <p class="text-xs font-bold tracking-[0.25em] text-white/80 uppercase">Store Prize</p>
-        <p class="font-display mt-3 text-4xl font-extrabold">$250</p>
-        <p class="mt-3 max-w-sm text-sm leading-relaxed text-white/90">{{ contest.storePrize }}</p>
+        <p class="text-xs font-bold tracking-[0.25em] text-white/80 uppercase">Manager Prize</p>
+        <p class="font-display mt-3 max-w-sm text-2xl font-extrabold leading-snug">{{ contest.storePrize }}</p>
       </div>
     </div>
   </section>
@@ -195,7 +193,7 @@ const fmtDate = (iso: string) =>
       <div class="rounded-2xl border border-slate-200 bg-white p-6">
         <p class="font-display font-bold text-slate-900">Minimum to qualify</p>
         <p class="mt-2 text-sm leading-relaxed text-slate-600">
-          Team members need at least 20 qualifying orders to be eligible for the Cineplex gift cards.
+          Qualifying requirements are set for each contest event. Follow the current tracker and event rules announced for this contest.
         </p>
       </div>
       <div class="rounded-2xl border border-slate-200 bg-white p-6">

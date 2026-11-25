@@ -63,6 +63,33 @@ export class ContestsService implements OnApplicationBootstrap {
     return contest;
   }
 
+  async create(body: ContestBody): Promise<Contest> {
+    for (const key of ['title', 'startDate', 'endDate', 'intro', 'teamPrize', 'storePrize'] as const) {
+      if (!body[key]?.trim()) {
+        throw new BadRequestException(`${key} is required`);
+      }
+    }
+    if (body.startDate! > body.endDate!) {
+      throw new BadRequestException('endDate must be on or after startDate');
+    }
+
+    await this.contests.update({ isActive: true }, { isActive: false });
+    const contest = await this.contests.save(
+      this.contests.create({
+        title: body.title!.trim(),
+        product: body.product?.trim() || 'Upsell',
+        startDate: body.startDate!,
+        endDate: body.endDate!,
+        intro: body.intro!.trim(),
+        teamPrize: body.teamPrize!.trim(),
+        storePrize: body.storePrize!.trim(),
+        isActive: true,
+      }),
+    );
+    contest.entries = [];
+    return contest;
+  }
+
   async update(body: ContestBody): Promise<Contest> {
     const contest = await this.getActive();
     for (const key of [
