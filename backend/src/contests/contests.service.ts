@@ -2,13 +2,12 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
 import { Contest } from './contest.entity.js';
 import { ContestEntry, ContestTrend } from './contest-entry.entity.js';
-import { CONTEST_SEED } from './contests-seed.data.js';
+import { Store } from '../stores/store.entity.js';
 
 export interface ContestBody {
   title?: string;
@@ -18,7 +17,9 @@ export interface ContestBody {
   intro?: string;
   teamPrize?: string;
   storePrize?: string;
-  isActive?: boolean;
+  winner1StoreId?: number | null;
+  winner2StoreId?: number | null;
+  winner3StoreId?: number | null;
 }
 
 export interface EntryBody {
@@ -32,35 +33,77 @@ export interface EntryBody {
 const TRENDS = Object.values(ContestTrend);
 
 @Injectable()
-export class ContestsService implements OnApplicationBootstrap {
+export class ContestsService {
   constructor(
     @InjectRepository(Contest) private readonly contests: Repository<Contest>,
     @InjectRepository(ContestEntry)
     private readonly entries: Repository<ContestEntry>,
+    @InjectRepository(Store)
+    private readonly stores: Repository<Store>,
   ) {}
 
-  async onApplicationBootstrap() {
-    if ((await this.contests.count()) === 0) {
-      const { entries, ...contest } = CONTEST_SEED;
-      const saved = await this.contests.save(this.contests.create(contest));
-      await this.entries.save(
-        entries.map((e) => this.entries.create({ ...e, contestId: saved.id })),
-      );
-    }
+  private todayInQuebec(): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto',
+    }).format(new Date());
   }
 
-  /** The active contest with its leaderboard, ranked by attach rate. */
-  async getActive(): Promise<Contest> {
+  /** The active contest with its leaderboard, even when it is not currently live. */
+  async getManaged(): Promise<Contest | null> {
     const contest = await this.contests.findOne({
       where: { isActive: true },
+      order: { createdAt: 'DESC' },
     });
-    if (!contest) throw new NotFoundException('No active contest');
+    if (!contest) return null;
+    return this.withEntries(contest);
+  }
+
+  private async withEntries(contest: Contest): Promise<Contest> {
     contest.entries = await this.entries.find({
       where: { contestId: contest.id },
       relations: { store: true },
       order: { upsellRate: 'DESC' },
     });
     return contest;
+  }
+
+  async getAllManaged(): Promise<Contest[]> {
+    const contests = await this.contests.find({
+      order: { createdAt: 'DESC' },
+    });
+    return Promise.all(contests.map((contest) => this.withEntries(contest)));
+  }
+
+  async getLatestCompleted(): Promise<Contest | null> {
+    return this.contests.findOne({
+      where: { endDate: LessThan(this.todayInQuebec()) },
+      order: { endDate: 'DESC', createdAt: 'DESC' },
+    });
+  }
+
+  /** Returns a contest only while its configured date range includes today in Québec. */
+  async getActive(): Promise<Contest | null> {
+    const contest = await this.getManaged();
+    const today = this.todayInQuebec();
+    if (!contest || contest.startDate > today || contest.endDate < today)
+      return null;
+    return contest;
+  }
+
+  private async validateWinnerStores(body: ContestBody) {
+    const ids = [
+      body.winner1StoreId,
+      body.winner2StoreId,
+      body.winner3StoreId,
+    ].filter((id): id is number => id !== undefined && id !== null);
+    if (ids.some((id) => !Number.isInteger(id) || id <= 0))
+      throw new BadRequestException('Winner store IDs must be positive integers');
+    if (new Set(ids).size !== ids.length)
+      throw new BadRequestException('Each podium place must have a different store');
+    for (const id of ids) {
+      if (!(await this.stores.exists({ where: { id } })))
+        throw new BadRequestException(`Store ${id} does not exist`);
+    }
   }
 
   async create(body: ContestBody): Promise<Contest> {
@@ -72,6 +115,7 @@ export class ContestsService implements OnApplicationBootstrap {
     if (body.startDate! > body.endDate!) {
       throw new BadRequestException('endDate must be on or after startDate');
     }
+    await this.validateWinnerStores(body);
 
     await this.contests.update({ isActive: true }, { isActive: false });
     const contest = await this.contests.save(
@@ -83,6 +127,9 @@ export class ContestsService implements OnApplicationBootstrap {
         intro: body.intro!.trim(),
         teamPrize: body.teamPrize!.trim(),
         storePrize: body.storePrize!.trim(),
+        winner1StoreId: body.winner1StoreId ?? null,
+        winner2StoreId: body.winner2StoreId ?? null,
+        winner3StoreId: body.winner3StoreId ?? null,
         isActive: true,
       }),
     );
@@ -90,8 +137,19 @@ export class ContestsService implements OnApplicationBootstrap {
     return contest;
   }
 
-  async update(body: ContestBody): Promise<Contest> {
-    const contest = await this.getActive();
+  async update(id: string, body: ContestBody): Promise<Contest> {
+    const contest = await this.contests.findOne({
+      where: { id },
+    });
+    if (!contest) throw new NotFoundException(`Contest ${id} not found`);
+    await this.validateWinnerStores(body);
+    for (const key of [
+      'winner1StoreId',
+      'winner2StoreId',
+      'winner3StoreId',
+    ] as const) {
+      if (body[key] !== undefined) contest[key] = body[key] ?? null;
+    }
     for (const key of [
       'title',
       'product',
@@ -101,11 +159,33 @@ export class ContestsService implements OnApplicationBootstrap {
       'teamPrize',
       'storePrize',
     ] as const) {
-      if (body[key] !== undefined) contest[key] = body[key]!;
+      if (body[key] !== undefined) contest[key] = body[key]!.trim();
     }
-    if (body.isActive !== undefined) contest.isActive = body.isActive;
+    if (
+      !contest.title.trim() ||
+      !contest.startDate ||
+      !contest.endDate ||
+      !contest.intro.trim() ||
+      !contest.teamPrize.trim() ||
+      !contest.storePrize.trim()
+    ) {
+      throw new BadRequestException('Contest fields cannot be empty');
+    }
+    if (contest.startDate > contest.endDate) {
+      throw new BadRequestException('endDate must be on or after startDate');
+    }
     await this.contests.save(contest);
-    return this.getActive();
+    return this.withEntries(contest);
+  }
+
+  async remove(id: string): Promise<{ deleted: true }> {
+    const contest = await this.contests.findOne({
+      where: { id },
+    });
+    if (!contest) throw new NotFoundException(`Contest ${id} not found`);
+    await this.entries.delete({ contestId: id });
+    await this.contests.delete({ id });
+    return { deleted: true };
   }
 
   private checkEntry(body: EntryBody, partial = false) {
@@ -121,7 +201,8 @@ export class ContestsService implements OnApplicationBootstrap {
 
   async addEntry(body: EntryBody): Promise<Contest> {
     this.checkEntry(body);
-    const contest = await this.getActive();
+    const contest = await this.getManaged();
+    if (!contest) throw new NotFoundException('No contest to add an entry to');
     await this.entries.save(
       this.entries.create({
         contestId: contest.id,
@@ -132,7 +213,9 @@ export class ContestsService implements OnApplicationBootstrap {
         trend: (body.trend as ContestTrend) ?? ContestTrend.SAME,
       }),
     );
-    return this.getActive();
+    const updated = await this.getManaged();
+    if (!updated) throw new NotFoundException('Contest not found');
+    return updated;
   }
 
   async updateEntry(id: string, body: EntryBody): Promise<Contest> {
@@ -145,12 +228,16 @@ export class ContestsService implements OnApplicationBootstrap {
       entry.qualifyingOrders = body.qualifyingOrders;
     if (body.trend !== undefined) entry.trend = body.trend as ContestTrend;
     await this.entries.save(entry);
-    return this.getActive();
+    const updated = await this.getManaged();
+    if (!updated) throw new NotFoundException('Contest not found');
+    return updated;
   }
 
   async removeEntry(id: string): Promise<Contest> {
     const result = await this.entries.delete({ id });
     if (!result.affected) throw new NotFoundException(`Entry ${id} not found`);
-    return this.getActive();
+    const updated = await this.getManaged();
+    if (!updated) throw new NotFoundException('Contest not found');
+    return updated;
   }
 }

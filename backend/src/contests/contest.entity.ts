@@ -33,6 +33,15 @@ export class Contest {
   @Column({ type: 'text' })
   storePrize: string;
 
+  @Column({ type: 'int', nullable: true })
+  winner1StoreId: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  winner2StoreId: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  winner3StoreId: number | null;
+
   @Column({ default: true })
   isActive: boolean;
 

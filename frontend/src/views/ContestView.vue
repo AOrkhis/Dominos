@@ -2,11 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import {
-  contest as localContest,
-  leaderboard as localLeaderboard,
-  type ContestEntry,
-} from '@/data/contest'
 import { apiGet } from '@/lib/api'
 
 interface ApiContest {
@@ -22,42 +17,30 @@ interface ApiContest {
     manager: string
     upsellRate: string | number
     qualifyingOrders: number
-    trend: ContestEntry['trend']
+    trend: 'up' | 'down' | 'same'
   }[]
 }
 
-const contest = ref(localContest)
-const leaderboard = ref<ContestEntry[]>(localLeaderboard)
+const contest = ref<ApiContest | null>(null)
+const loading = ref(true)
+const error = ref('')
 
 onMounted(async () => {
   try {
-    const c = await apiGet<ApiContest>('/contest')
-    contest.value = {
-      title: c.title,
-      product: c.product,
-      start: c.startDate,
-      end: c.endDate,
-      intro: c.intro,
-      teamPrize: c.teamPrize,
-      storePrize: c.storePrize,
-    }
-    leaderboard.value = c.entries.map((e) => ({
-      storeId: e.store.id,
-      manager: e.manager,
-      upsellRate: Number(e.upsellRate),
-      qualifyingOrders: e.qualifyingOrders,
-      trend: e.trend,
-    }))
-  } catch {
-    // API offline — bundled data stays
+    contest.value = await apiGet<ApiContest | null>('/contest')
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Contest information is unavailable'
+  } finally {
+    loading.value = false
   }
 })
 
 const now = new Date()
 const daysUntil = (d: Date) => Math.max(0, Math.ceil((d.getTime() - now.getTime()) / 86400000))
 const status = computed(() => {
-  const start = new Date(`${contest.value.start}T00:00:00`)
-  const end = new Date(`${contest.value.end}T23:59:59`)
+  if (!contest.value) return null
+  const start = new Date(`${contest.value.startDate}T00:00:00`)
+  const end = new Date(`${contest.value.endDate}T23:59:59`)
   return now < start
     ? { label: 'Starts in', days: daysUntil(start), live: false }
     : now > end
@@ -65,6 +48,15 @@ const status = computed(() => {
       : { label: 'Days left', days: daysUntil(end), live: true }
 })
 
+const leaderboard = computed(() =>
+  contest.value?.entries.map((entry) => ({
+    storeId: entry.store.id,
+    manager: entry.manager,
+    upsellRate: Number(entry.upsellRate),
+    qualifyingOrders: entry.qualifyingOrders,
+    trend: entry.trend,
+  })) ?? [],
+)
 const maxRate = computed(() => Math.max(1, ...leaderboard.value.map((e) => e.upsellRate)))
 
 const medal = (i: number) =>
@@ -76,14 +68,29 @@ const fmtDate = (iso: string) =>
 </script>
 
 <template>
-  <PageHeader :eyebrow="`${fmtDate(contest.start)} – ${fmtDate(contest.end)}`" :title="contest.title">
+  <PageHeader v-if="loading" eyebrow="Upsell Contest" title="Loading contest">
+    <p class="mt-4 max-w-2xl text-base leading-relaxed text-brand-200">Checking for a live event…</p>
+  </PageHeader>
+  <PageHeader v-else-if="error" eyebrow="Upsell Contest" title="Contest information unavailable">
+    <p class="mt-4 max-w-2xl text-base leading-relaxed text-brand-200">{{ error }}</p>
+  </PageHeader>
+  <PageHeader v-else-if="!contest" eyebrow="Upsell Contest" title="No live contests right now">
+    <p class="mt-4 max-w-2xl text-base leading-relaxed text-brand-200">
+      Check back soon for the next event.
+    </p>
+  </PageHeader>
+  <PageHeader
+    v-else
+    :eyebrow="`${fmtDate(contest.startDate)} – ${fmtDate(contest.endDate)}`"
+    :title="contest.title"
+  >
     <p class="mt-4 max-w-2xl text-base leading-relaxed text-brand-200">{{ contest.intro }}</p>
 
     <div class="mt-8 inline-flex items-center gap-4 rounded-2xl border border-white/15 bg-white/5 px-6 py-4 backdrop-blur-sm">
-      <span class="font-display text-4xl font-extrabold text-gold-400">{{ status.days }}</span>
+      <span class="font-display text-4xl font-extrabold text-gold-400">{{ status?.days ?? 0 }}</span>
       <span class="text-sm font-semibold text-brand-100">
-        {{ status.label }}
-        <span v-if="status.live" class="mt-0.5 flex items-center gap-1.5 text-xs text-emerald-400">
+        {{ status?.label }}
+        <span v-if="status?.live" class="mt-0.5 flex items-center gap-1.5 text-xs text-emerald-400">
           <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> LIVE
         </span>
       </span>
@@ -91,7 +98,7 @@ const fmtDate = (iso: string) =>
   </PageHeader>
 
   <!-- Prizes -->
-  <section class="mx-auto max-w-7xl px-4 py-12 sm:px-6">
+  <section v-if="contest" class="mx-auto max-w-7xl px-4 py-12 sm:px-6">
     <div class="grid gap-5 md:grid-cols-2">
       <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-gold-400 to-amber-600 p-8 text-white shadow-lg">
         <svg class="absolute -top-4 -right-4 h-32 w-32 opacity-20" viewBox="0 0 24 24" fill="currentColor">
@@ -108,13 +115,16 @@ const fmtDate = (iso: string) =>
   </section>
 
   <!-- Leaderboard -->
-  <section class="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
+  <section v-if="contest" class="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
     <div class="flex items-end justify-between">
       <h2 class="font-display text-2xl font-extrabold text-slate-900">Leaderboard</h2>
       <p class="text-xs font-medium text-slate-400">Updated hourly · % of orders with {{ contest.product }}</p>
     </div>
 
-    <div class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div
+      v-if="leaderboard.length"
+      class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+    >
       <div
         v-for="(entry, i) in leaderboard"
         :key="entry.storeId"
@@ -150,7 +160,6 @@ const fmtDate = (iso: string) =>
             />
           </div>
         </div>
-
         <div class="text-right">
           <p class="font-display text-lg font-extrabold text-slate-900">{{ entry.upsellRate }}%</p>
           <p class="flex items-center justify-end gap-1 text-[11px] font-medium text-slate-400">
@@ -180,6 +189,12 @@ const fmtDate = (iso: string) =>
           </p>
         </div>
       </div>
+    </div>
+    <div
+      v-else
+      class="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500"
+    >
+      The leaderboard will appear when stores have qualifying results.
     </div>
 
     <!-- Rules -->

@@ -1,6 +1,102 @@
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import DominoLogo from '@/components/DominoLogo.vue'
+import { apiGet } from '@/lib/api'
+
+interface HomeContest {
+  title: string
+  startDate: string
+  endDate: string
+  intro: string
+  teamPrize: string
+  storePrize: string
+  entries: {
+    store: { id: number }
+    manager: string
+    upsellRate: string | number
+  }[]
+}
+
+interface HomeCampaign {
+  title: string
+  startDate: string
+  endDate: string
+}
+
+interface CompletedContest {
+  title: string
+  endDate: string
+  winner1StoreId: number | null
+  winner2StoreId: number | null
+  winner3StoreId: number | null
+}
+
+const contest = ref<HomeContest | null>(null)
+const contestLoading = ref(true)
+const contestError = ref('')
+const campaigns = ref<HomeCampaign[]>([])
+const campaignsLoading = ref(true)
+const campaignsError = ref('')
+const lastContest = ref<CompletedContest | null>(null)
+const lastContestLoading = ref(true)
+const lastContestError = ref('')
+
+const dateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+const today = dateKey(new Date())
+const activeEvents = computed(() =>
+  campaigns.value
+    .filter((event) => event.startDate <= today && event.endDate >= today)
+    .sort((a, b) => a.endDate.localeCompare(b.endDate)),
+)
+const upcomingEvents = computed(() =>
+  campaigns.value
+    .filter((event) => event.startDate > today)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate)),
+)
+
+const fmtContestDate = (date: string) =>
+  new Date(`${date}T12:00:00`).toLocaleDateString('en-CA', {
+    month: 'short',
+    day: 'numeric',
+  })
+
+async function loadCurrentContest() {
+  try {
+    contest.value = await apiGet<HomeContest | null>('/contest')
+  } catch (e) {
+    contestError.value = e instanceof Error ? e.message : 'Contest information is unavailable'
+  } finally {
+    contestLoading.value = false
+  }
+}
+
+async function loadCalendarEvents() {
+  try {
+    campaigns.value = await apiGet<HomeCampaign[]>('/campaigns')
+  } catch (e) {
+    campaignsError.value = e instanceof Error ? e.message : 'Calendar information is unavailable'
+  } finally {
+    campaignsLoading.value = false
+  }
+}
+
+async function loadLastContest() {
+  try {
+    lastContest.value = await apiGet<CompletedContest | null>('/contest/winners/latest')
+  } catch (e) {
+    lastContestError.value = e instanceof Error ? e.message : 'Contest winners are unavailable'
+  } finally {
+    lastContestLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void loadCurrentContest()
+  void loadCalendarEvents()
+  void loadLastContest()
+})
 
 const tickerItems = [
   'National Offers',
@@ -141,24 +237,68 @@ const steps = [
         <div class="relative mx-auto aspect-square max-w-md">
           <DominoLogo class="absolute top-1/2 left-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 drop-shadow-2xl" />
 
-          <div class="absolute top-4 -left-4 animate-fade-up rounded-2xl border border-white/10 bg-white/10 p-4 shadow-xl backdrop-blur-md" style="animation-delay: 0.15s">
-            <p class="text-[10px] font-bold tracking-widest text-brand-200 uppercase">Upsell rate</p>
-            <p class="font-display mt-1 text-2xl font-extrabold text-white">+18.4%</p>
-            <div class="mt-2 h-1.5 w-28 overflow-hidden rounded-full bg-white/15">
-              <div class="h-full w-3/4 rounded-full bg-emerald-400" />
-            </div>
+          <div class="absolute top-4 -left-4 max-w-64 animate-fade-up rounded-2xl border border-white/10 bg-white/10 p-4 shadow-xl backdrop-blur-md" style="animation-delay: 0.15s">
+            <p class="text-[10px] font-bold tracking-widest text-brand-200 uppercase">Upcoming events</p>
+            <template v-if="!campaignsLoading && !campaignsError && upcomingEvents.length">
+              <p
+                v-for="event in upcomingEvents.slice(0, 2)"
+                :key="event.title"
+                class="font-display mt-1 truncate text-base font-extrabold text-white"
+                :title="event.title"
+              >
+                {{ event.title }}
+              </p>
+              <p class="mt-1 text-xs text-brand-200">
+                {{ fmtContestDate(upcomingEvents[0]!.startDate) }}
+                <span v-if="upcomingEvents.length > 2"> · +{{ upcomingEvents.length - 2 }} more</span>
+              </p>
+            </template>
+            <p v-else-if="campaignsLoading" class="mt-1 text-sm font-semibold text-white">Loading events…</p>
+            <p v-else-if="campaignsError" class="mt-1 text-sm font-semibold text-white">Calendar unavailable</p>
+            <p v-else class="mt-1 text-sm font-semibold text-white">No upcoming events</p>
           </div>
 
-          <div class="absolute right-0 bottom-10 animate-fade-up rounded-2xl border border-white/10 bg-white/10 p-4 shadow-xl backdrop-blur-md" style="animation-delay: 0.3s">
+          <div class="absolute right-0 bottom-10 max-w-64 animate-fade-up rounded-2xl border border-white/10 bg-white/10 p-4 shadow-xl backdrop-blur-md" style="animation-delay: 0.3s">
             <p class="text-[10px] font-bold tracking-widest text-brand-200 uppercase">This week</p>
-            <p class="font-display mt-1 text-2xl font-extrabold text-gold-400">50% OFF</p>
-            <p class="text-xs text-brand-200">Cyber Week — all stores</p>
+            <template v-if="!campaignsLoading && !campaignsError && activeEvents.length">
+              <p
+                v-for="event in activeEvents.slice(0, 2)"
+                :key="event.title"
+                class="font-display mt-1 truncate text-base font-extrabold text-gold-400"
+                :title="event.title"
+              >
+                {{ event.title }}
+              </p>
+              <p v-if="activeEvents.length > 2" class="mt-1 text-xs text-brand-200">
+                +{{ activeEvents.length - 2 }} more active
+              </p>
+            </template>
+            <p v-else-if="campaignsLoading" class="mt-1 text-sm text-brand-200">Loading events…</p>
+            <p v-else-if="campaignsError" class="mt-1 text-sm text-brand-200">Calendar unavailable</p>
+            <p v-else class="mt-1 text-sm font-semibold text-white">No active events</p>
           </div>
 
-          <div class="absolute bottom-0 left-6 animate-fade-up rounded-2xl border border-white/10 bg-accent-500/90 p-4 shadow-xl backdrop-blur-md" style="animation-delay: 0.45s">
-            <p class="text-[10px] font-bold tracking-widest text-white/80 uppercase">Contest leader</p>
-            <p class="font-display mt-1 text-xl font-extrabold text-white">Store 10654</p>
-            <p class="text-xs text-white/80">24.6% attach rate</p>
+          <div class="absolute bottom-0 left-6 max-w-64 animate-fade-up rounded-2xl border border-white/10 bg-accent-500/90 p-4 shadow-xl backdrop-blur-md" style="animation-delay: 0.45s">
+            <template v-if="lastContest">
+              <p class="text-[10px] font-bold tracking-widest text-white/80 uppercase">Last contest winners</p>
+              <p class="font-display mt-1 truncate text-sm font-extrabold text-white" :title="lastContest.title">
+                {{ lastContest.title }}
+              </p>
+              <p
+                v-for="winner in [
+                  { place: '1st', storeId: lastContest.winner1StoreId },
+                  { place: '2nd', storeId: lastContest.winner2StoreId },
+                  { place: '3rd', storeId: lastContest.winner3StoreId },
+                ]"
+                :key="winner.place"
+                class="mt-0.5 text-xs text-white/90"
+              >
+                {{ winner.place }} place: {{ winner.storeId ? `Store ${winner.storeId}` : 'Not selected' }}
+              </p>
+            </template>
+            <p v-else-if="lastContestLoading" class="text-xs font-semibold text-white/90">Loading winners…</p>
+            <p v-else-if="lastContestError" class="text-xs font-semibold text-white/90">Winners unavailable</p>
+            <p v-else class="text-xs font-semibold text-white/90">No completed contest yet</p>
           </div>
         </div>
       </div>
@@ -256,6 +396,7 @@ const steps = [
   <!-- Contest banner -->
   <section class="mx-auto max-w-7xl px-4 py-20 sm:px-6">
     <RouterLink
+      v-if="contest"
       to="/contest"
       class="group relative block overflow-hidden rounded-3xl bg-gradient-to-r from-accent-600 via-accent-500 to-rose-500 p-10 shadow-2xl shadow-accent-500/25 sm:p-14"
     >
@@ -270,12 +411,16 @@ const steps = [
         <div class="max-w-xl">
           <p class="text-xs font-bold tracking-[0.3em] text-white/80 uppercase">Live Contest</p>
           <h2 class="font-display mt-3 text-3xl font-extrabold text-white sm:text-4xl">
-            S'more Lava, S'more Cakes!
+            {{ contest.title }}
           </h2>
-          <p class="mt-3 leading-relaxed text-white/85">
-            Top 10 sellers win a $50 Cineplex gift card — the top store's manager wins $250.
-            Check the leaderboard.
+          <p class="mt-3 leading-relaxed text-white/85">{{ contest.intro }}</p>
+          <p class="mt-3 text-sm font-semibold text-white/90">
+            {{ fmtContestDate(contest.startDate) }} – {{ fmtContestDate(contest.endDate) }}
           </p>
+          <div class="mt-4 flex flex-wrap gap-3 text-sm text-white/90">
+            <span>Team prize: {{ contest.teamPrize }}</span>
+            <span>Manager prize: {{ contest.storePrize }}</span>
+          </div>
         </div>
         <span class="inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 text-sm font-bold text-accent-600 shadow-lg transition group-hover:scale-105">
           View Leaderboard
@@ -284,6 +429,25 @@ const steps = [
           </svg>
         </span>
       </div>
+    </RouterLink>
+    <RouterLink
+      v-else
+      to="/contest"
+      class="group block rounded-3xl border border-slate-200 bg-white p-10 shadow-sm transition hover:border-brand-300 hover:shadow-lg sm:p-14"
+    >
+      <p class="text-xs font-bold tracking-[0.3em] text-brand-500 uppercase">Upsell Contest</p>
+      <h2 class="font-display mt-3 text-3xl font-extrabold text-slate-900 sm:text-4xl">
+        {{ contestLoading ? 'Checking for a live contest…' : contestError ? 'Contest information unavailable' : 'No live contests right now' }}
+      </h2>
+      <p class="mt-3 text-slate-600">
+        {{ contestError || 'Check back soon for the next event and leaderboard.' }}
+      </p>
+      <span class="mt-5 inline-flex items-center gap-2 text-sm font-bold text-brand-600">
+        Visit contest page
+        <svg class="h-4 w-4 transition group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M5 12h14m-6-6 6 6-6 6" />
+        </svg>
+      </span>
     </RouterLink>
   </section>
 </template>

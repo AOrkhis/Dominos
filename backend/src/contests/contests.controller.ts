@@ -26,6 +26,26 @@ export class ContestsController {
     return this.contests.getActive();
   }
 
+  @Get('admin')
+  @UseGuards(RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  getManaged() {
+    return this.contests.getManaged();
+  }
+
+  @Get('admin/all')
+  @UseGuards(RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  getAllManaged() {
+    return this.contests.getAllManaged();
+  }
+
+  @Public()
+  @Get('winners/latest')
+  getLatestCompleted() {
+    return this.contests.getLatestCompleted();
+  }
+
   @Post()
   @UseGuards(RolesGuard)
   @Roles(...ADMIN_ROLES)
@@ -33,11 +53,18 @@ export class ContestsController {
     return this.contests.create(body);
   }
 
-  @Patch()
+  @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(...ADMIN_ROLES)
-  update(@Body() body: ContestBody) {
-    return this.contests.update(body);
+  update(@Param('id') id: string, @Body() body: ContestBody) {
+    return this.contests.update(id, body);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  remove(@Param('id') id: string) {
+    return this.contests.remove(id);
   }
 
   @Post('entries')

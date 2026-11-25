@@ -38,6 +38,8 @@ interface ApiContest {
   id: string; title: string; product: string
   startDate: string; endDate: string; intro: string
   teamPrize: string; storePrize: string; entries: ApiEntry[]
+  winner1StoreId: number | null; winner2StoreId: number | null; winner3StoreId: number | null
+  isActive: boolean
 }
 
 // ---------- shared state ----------
@@ -99,6 +101,8 @@ const requests = ref<ApiRequest[]>([])
 const campaigns = ref<ApiCampaign[]>([])
 const materials = ref<ApiMaterial[]>([])
 const contest = ref<ApiContest | null>(null)
+const contestHistory = ref<ApiContest[]>([])
+const selectedContestId = ref('')
 
 const roleLabels: Record<string, string> = {
   super_admin: 'Super Admin',
@@ -141,11 +145,13 @@ async function loadAll() {
       const [c, m, ct] = await Promise.all([
         apiGet<ApiCampaign[]>('/campaigns'),
         apiGet<ApiMaterial[]>('/materials/all'),
-        apiGet<ApiContest>('/contest'),
+        apiGet<ApiContest[]>('/contest/admin/all'),
       ])
       campaigns.value = c
       materials.value = m
-      contest.value = ct
+      contestHistory.value = ct
+      contest.value = ct.find((item) => item.isActive) ?? ct[0] ?? null
+      selectedContestId.value = contest.value?.id ?? ''
     }
   } catch (e) {
     fail(e)
@@ -411,35 +417,107 @@ async function removeMaterial(m: ApiMaterial) {
 
 // ---------- contest ----------
 const blankContest = () => ({
+  id: '',
   title: '',
   description: '',
   startDate: '',
   endDate: '',
   teamPrize: '',
   managerPrize: '',
+  winner1StoreId: '' as number | '',
+  winner2StoreId: '' as number | '',
+  winner3StoreId: '' as number | '',
 })
 const contestForm = reactive(blankContest())
 const showContestForm = ref(false)
 
+function selectContest() {
+  contest.value =
+    contestHistory.value.find((item) => item.id === selectedContestId.value) ?? null
+  Object.assign(contestForm, blankContest())
+  showContestForm.value = false
+  showEntryForm.value = false
+}
+
+function saveContestInList(saved: ApiContest) {
+  const index = contestHistory.value.findIndex((item) => item.id === saved.id)
+  if (index >= 0) contestHistory.value[index] = saved
+  else contestHistory.value.unshift(saved)
+  contest.value = saved
+  selectedContestId.value = saved.id
+}
+
+function addContest() {
+  Object.assign(contestForm, blankContest())
+  showContestForm.value = true
+}
+
+function editContest() {
+  if (!contest.value) return
+  Object.assign(contestForm, {
+    id: contest.value.id,
+    title: contest.value.title,
+    description: contest.value.intro,
+    startDate: contest.value.startDate,
+    endDate: contest.value.endDate,
+    teamPrize: contest.value.teamPrize,
+    managerPrize: contest.value.storePrize,
+    winner1StoreId: contest.value.winner1StoreId ?? '',
+    winner2StoreId: contest.value.winner2StoreId ?? '',
+    winner3StoreId: contest.value.winner3StoreId ?? '',
+  })
+  showContestForm.value = true
+}
+
 async function saveContestEvent() {
   error.value = ''
   try {
-    const created = await apiPost<ApiContest>('/contest', {
+    const body = {
       title: contestForm.title,
       intro: contestForm.description,
       startDate: contestForm.startDate,
       endDate: contestForm.endDate,
       teamPrize: contestForm.teamPrize,
       storePrize: contestForm.managerPrize,
-      product: 'Upsell',
-    })
-    contest.value = created.entries ? created : { ...created, entries: [] }
+      product: contest.value?.product ?? 'Upsell',
+      winner1StoreId: contestForm.winner1StoreId === '' ? null : Number(contestForm.winner1StoreId),
+      winner2StoreId: contestForm.winner2StoreId === '' ? null : Number(contestForm.winner2StoreId),
+      winner3StoreId: contestForm.winner3StoreId === '' ? null : Number(contestForm.winner3StoreId),
+    }
+    if (contestForm.id) {
+      const saved = await apiPatch<ApiContest>(`/contest/${contestForm.id}`, body)
+      saveContestInList(saved)
+      flash('Contest updated')
+    } else {
+      contestHistory.value = contestHistory.value.map((item) => ({ ...item, isActive: false }))
+      const saved = await apiPost<ApiContest>('/contest', body)
+      saveContestInList(saved)
+      flash('Contest event published')
+    }
     Object.assign(contestForm, blankContest())
     showContestForm.value = false
-    flash('Contest event is live')
   } catch (e) {
     fail(e)
   }
+}
+
+async function removeContest(id: string) {
+  try {
+    await apiDelete(`/contest/${id}`)
+    contestHistory.value = contestHistory.value.filter((item) => item.id !== id)
+    contest.value = contestHistory.value.find((item) => item.isActive) ?? contestHistory.value[0] ?? null
+    selectedContestId.value = contest.value?.id ?? ''
+    Object.assign(contestForm, blankContest())
+    showContestForm.value = false
+    showEntryForm.value = false
+    flash('Contest removed')
+  } catch (e) {
+    fail(e)
+  }
+}
+
+function confirmRemoveContest(id: string) {
+  askConfirm(`contest-${id}`, () => removeContest(id))
 }
 
 const entryForm = reactive({
@@ -461,27 +539,25 @@ async function saveEntry() {
   error.value = ''
   try {
     if (entryForm.id) {
-      const updated = await apiPatch<ApiEntry>(`/contest/entries/${entryForm.id}`, {
+      const updated = await apiPatch<ApiContest>(`/contest/entries/${entryForm.id}`, {
         manager: entryForm.manager,
         upsellRate: Number(entryForm.upsellRate),
         qualifyingOrders: Number(entryForm.qualifyingOrders),
         trend: entryForm.trend,
       })
-      const i = contest.value!.entries.findIndex((e) => e.id === updated.id)
-      if (i >= 0) contest.value!.entries[i] = { ...contest.value!.entries[i], ...updated }
+      saveContestInList(updated)
       flash('Entry updated')
     } else {
-      const created = await apiPost<ApiEntry>('/contest/entries', {
+      const updated = await apiPost<ApiContest>('/contest/entries', {
         storeId: Number(entryForm.storeId),
         manager: entryForm.manager,
         upsellRate: Number(entryForm.upsellRate),
         qualifyingOrders: Number(entryForm.qualifyingOrders),
         trend: entryForm.trend,
       })
-      contest.value?.entries.push(created)
+      saveContestInList(updated)
       flash('Entry added')
     }
-    contest.value?.entries.sort((a, b) => Number(b.upsellRate) - Number(a.upsellRate))
     Object.assign(entryForm, { id: '', storeId: '', manager: '', upsellRate: '', qualifyingOrders: '', trend: 'same' })
     showEntryForm.value = false
   } catch (e) {
@@ -491,7 +567,10 @@ async function saveEntry() {
 async function removeEntry(e: ApiEntry) {
   try {
     await apiDelete(`/contest/entries/${e.id}`)
-    contest.value!.entries = contest.value!.entries.filter((x) => x.id !== e.id)
+    if (contest.value) {
+      contest.value.entries = contest.value.entries.filter((entry) => entry.id !== e.id)
+      saveContestInList(contest.value)
+    }
   } catch (err) {
     fail(err)
   }
@@ -903,17 +982,41 @@ const confirmBtn = (key: string) =>
     </div>
 
     <!-- ==================== CONTEST ==================== -->
-    <div v-else-if="activeTab === 'contest' && contest" class="mt-8 space-y-5">
+    <div v-else-if="activeTab === 'contest'" class="mt-8 space-y-5">
+      <div v-if="contestHistory.length > 1" class="max-w-md">
+        <label class="mb-1 block text-xs font-bold text-slate-500">Contest event</label>
+        <select v-model="selectedContestId" :class="input" @change="selectContest">
+          <option v-for="item in contestHistory" :key="item.id" :value="item.id">
+            {{ item.title }} · {{ fmtRange(item.startDate, item.endDate) }}
+          </option>
+        </select>
+      </div>
       <div class="flex items-center justify-between">
         <div>
-          <p class="font-display font-bold text-slate-900">{{ contest.title }}</p>
-          <p class="text-sm text-slate-500">{{ fmtRange(contest.startDate, contest.endDate) }} · {{ contest.entries.length }} stores on the board</p>
+          <template v-if="contest">
+            <p class="font-display font-bold text-slate-900">{{ contest.title }}</p>
+            <p class="text-sm text-slate-500">
+              {{ fmtRange(contest.startDate, contest.endDate) }} ·
+              {{ contest.isActive ? 'Current event' : 'Past event' }} ·
+              {{ contest.entries.length }} stores on the board
+            </p>
+          </template>
+          <template v-else>
+            <p class="font-display font-bold text-slate-900">No contest event configured</p>
+            <p class="text-sm text-slate-500">There are no live contests right now.</p>
+          </template>
         </div>
         <div class="flex gap-2">
-          <button :class="btn" @click="showContestForm = !showContestForm">
-            {{ showContestForm ? '− Close' : '+ Add event' }}
+          <button :class="btn" @click="addContest">+ Add event</button>
+          <button v-if="contest" :class="ghostBtn" @click="editContest">Edit event</button>
+          <button
+            v-if="contest"
+            :class="confirmBtn(`contest-${contest.id}`)"
+            @click="confirmRemoveContest(contest.id)"
+          >
+            {{ confirming.has(`contest-${contest.id}`) ? 'Confirm remove' : 'Remove event' }}
           </button>
-          <button :class="ghostBtn" @click="showEntryForm = !showEntryForm">
+          <button v-if="contest?.isActive" :class="ghostBtn" @click="showEntryForm = !showEntryForm">
             {{ showEntryForm ? '− Close' : '+ Add entry' }}
           </button>
         </div>
@@ -925,7 +1028,7 @@ const confirmBtn = (key: string) =>
         @submit.prevent="saveContestEvent"
       >
         <h3 class="font-display text-lg font-bold text-slate-900 sm:col-span-2">
-          New contest event
+          {{ contestForm.id ? 'Edit contest event' : 'New contest event' }}
         </h3>
         <input v-model="contestForm.title" :class="[input, 'sm:col-span-2']" placeholder="Event title" required />
         <textarea v-model="contestForm.description" :class="[input, 'sm:col-span-2']" rows="3" placeholder="Description" required />
@@ -935,20 +1038,45 @@ const confirmBtn = (key: string) =>
         </div>
         <div>
           <label class="text-xs font-bold text-slate-500">End date</label>
-          <input v-model="contestForm.endDate" :class="input" type="date" required />
+          <input v-model="contestForm.endDate" :class="input" type="date" :min="contestForm.startDate" required />
         </div>
         <input v-model="contestForm.teamPrize" :class="input" placeholder="Team prize" required />
         <input v-model="contestForm.managerPrize" :class="input" placeholder="Manager prize" required />
+        <div>
+          <label class="mb-1 block text-xs font-bold text-slate-500">1st place store</label>
+          <select v-model="contestForm.winner1StoreId" :class="input">
+            <option value="">Not selected</option>
+            <option v-for="s in stores" :key="s.id" :value="s.id">{{ s.id }} — {{ s.name }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-bold text-slate-500">2nd place store</label>
+          <select v-model="contestForm.winner2StoreId" :class="input">
+            <option value="">Not selected</option>
+            <option v-for="s in stores" :key="s.id" :value="s.id">{{ s.id }} — {{ s.name }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-bold text-slate-500">3rd place store</label>
+          <select v-model="contestForm.winner3StoreId" :class="input">
+            <option value="">Not selected</option>
+            <option v-for="s in stores" :key="s.id" :value="s.id">{{ s.id }} — {{ s.name }}</option>
+          </select>
+        </div>
         <div class="flex gap-3 sm:col-span-2">
-          <button :class="btn" type="submit">Publish event</button>
-          <button type="button" :class="ghostBtn" @click="Object.assign(contestForm, blankContest()); showContestForm = false">
+          <button :class="btn" type="submit">{{ contestForm.id ? 'Save changes' : 'Publish event' }}</button>
+          <button
+            type="button"
+            :class="ghostBtn"
+            @click="Object.assign(contestForm, blankContest()); showContestForm = false"
+          >
             Cancel
           </button>
         </div>
       </form>
 
       <form
-        v-if="showEntryForm"
+        v-if="showEntryForm && contest?.isActive"
         class="grid gap-4 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-6"
         @submit.prevent="saveEntry"
       >
@@ -980,7 +1108,7 @@ const confirmBtn = (key: string) =>
         </div>
       </form>
 
-      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div v-if="contest" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div
           v-for="(e, i) in contest.entries"
           :key="e.id"
@@ -1000,8 +1128,12 @@ const confirmBtn = (key: string) =>
           </div>
           <p class="font-display text-lg font-extrabold text-slate-900">{{ Number(e.upsellRate) }}%</p>
           <p class="w-28 text-xs text-slate-500">{{ e.qualifyingOrders }} orders · {{ e.trend }}</p>
-          <button :class="ghostBtn + ' !px-3 !py-1.5 text-xs'" @click="editEntry(e)">Edit</button>
-          <button :class="confirmBtn(`e-${e.id}`)" @click="askConfirm(`e-${e.id}`, () => removeEntry(e))">
+          <button v-if="contest.isActive" :class="ghostBtn + ' !px-3 !py-1.5 text-xs'" @click="editEntry(e)">Edit</button>
+          <button
+            v-if="contest.isActive"
+            :class="confirmBtn(`e-${e.id}`)"
+            @click="askConfirm(`e-${e.id}`, () => removeEntry(e))"
+          >
             {{ confirming.has(`e-${e.id}`) ? 'Confirm' : 'Delete' }}
           </button>
         </div>
