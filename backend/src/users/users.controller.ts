@@ -16,7 +16,8 @@ import { UsersService } from './users.service.js';
 
 /**
  * Read/create: admins + supervisors (supervisors are scoped to their
- * stores inside the service). Modify/delete: admins only.
+ * stores inside the service). Supervisors can make limited scoped updates;
+ * admin roles manage accounts globally.
  */
 @Controller('users')
 @UseGuards(RolesGuard)
@@ -49,7 +50,14 @@ export class UsersController {
   @Roles(...MANAGER_ROLES)
   update(
     @Param('id') id: string,
-    @Body() body: { name?: string; role?: string; isActive?: boolean },
+    @Body()
+    body: {
+      name?: string;
+      email?: string;
+      password?: string;
+      role?: string;
+      isActive?: boolean;
+    },
     @CurrentUser() caller: User,
   ) {
     return this.users.update(id, body, caller);

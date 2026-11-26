@@ -117,6 +117,18 @@ const roleBadge: Record<string, string> = {
   user: 'bg-slate-100 text-slate-600',
 }
 const roles = ['user', 'supervisor', 'admin', 'super_admin'] as const
+const editableRoles = computed(() =>
+  user.value?.role === 'super_admin'
+    ? roles
+    : roles.filter((role) => role !== 'super_admin'),
+)
+const canEditUser = (target: ApiUser) =>
+  canManage.value &&
+  (user.value?.role === 'super_admin' ||
+    (target.role !== 'admin' && target.role !== 'super_admin') ||
+    target.id === user.value?.id)
+const canChangeUserRole = (target: ApiUser) =>
+  canEditUser(target) && target.id !== user.value?.id
 
 const statusMeta: Record<string, { label: string; chip: string }> = {
   new: { label: 'New', chip: 'bg-accent-100 text-accent-700' },
@@ -181,6 +193,8 @@ const stats = computed(() => [
 
 // ---------- people ----------
 const newUser = reactive({ name: '', email: '', password: '', role: 'user' as string })
+const editUser = reactive({ name: '', email: '', password: '' })
+const editingUserId = ref('')
 const busy = ref(false)
 const showAddUser = ref(false)
 const search = ref('')
@@ -194,6 +208,36 @@ const filteredUsers = computed(() => {
       (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)),
   )
 })
+
+function startEditingUser(target: ApiUser) {
+  Object.assign(editUser, { name: target.name, email: target.email, password: '' })
+  editingUserId.value = target.id
+}
+
+function cancelEditingUser() {
+  editingUserId.value = ''
+  Object.assign(editUser, { name: '', email: '', password: '' })
+}
+
+async function saveUser(target: ApiUser) {
+  busy.value = true
+  error.value = ''
+  const body: { name: string; email: string; password?: string } = {
+    name: editUser.name,
+    email: editUser.email,
+  }
+  if (editUser.password) body.password = editUser.password
+  try {
+    const updated = await apiPatch<ApiUser>(`/users/${target.id}`, body)
+    Object.assign(target, updated)
+    cancelEditingUser()
+    flash('Account updated')
+  } catch (e) {
+    fail(e)
+  } finally {
+    busy.value = false
+  }
+}
 
 async function createUser() {
   busy.value = true
@@ -680,7 +724,7 @@ const confirmBtn = (key: string) =>
         <input v-model="newUser.email" :class="input" type="email" placeholder="Email" required />
         <input v-model="newUser.password" :class="input" type="password" placeholder="Password (8+ chars)" required minlength="8" />
         <select v-model="newUser.role" :class="input">
-          <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
+          <option v-for="r in editableRoles" :key="r" :value="r">{{ roleLabels[r] }}</option>
         </select>
         <button :class="btn" :disabled="busy" type="submit">{{ busy ? 'Adding…' : 'Add person' }}</button>
       </form>
@@ -709,18 +753,25 @@ const confirmBtn = (key: string) =>
             Disabled
           </span>
 
-          <!-- Role changes stay admin-only; supervisors manage user accounts in their stores -->
+          <button
+            v-if="canEditUser(u)"
+            :class="ghostBtn + ' !px-3 !py-1.5 text-xs'"
+            @click="editingUserId === u.id ? cancelEditingUser() : startEditingUser(u)"
+          >
+            {{ editingUserId === u.id ? 'Close edit' : 'Edit account' }}
+          </button>
           <select
-            v-if="canManage"
+            v-if="canChangeUserRole(u)"
             :class="[input, 'w-32 !py-1.5 text-xs']"
             :value="u.role"
-            :disabled="u.role === 'super_admin' && user?.role !== 'super_admin'"
             title="Change role"
             @change="setRole(u, ($event.target as HTMLSelectElement).value)"
           >
-            <option v-for="r in roles" :key="r" :value="r">{{ roleLabels[r] }}</option>
+            <option v-for="r in editableRoles" :key="r" :value="r">{{ roleLabels[r] }}</option>
           </select>
-          <template v-if="canManage || (isSupervisor && u.role === 'user')">
+          <template
+            v-if="(canEditUser(u) && u.id !== user?.id) || (isSupervisor && u.role === 'user')"
+          >
             <button
               :class="ghostBtn + ' !px-3 !py-1.5 text-xs'"
               :title="u.isActive ? 'Deactivate account' : 'Activate account'"
@@ -733,6 +784,32 @@ const confirmBtn = (key: string) =>
             </button>
           </template>
         </div>
+
+        <form
+          v-if="editingUserId === u.id && canEditUser(u)"
+          class="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2"
+          @submit.prevent="saveUser(u)"
+        >
+          <input v-model="editUser.name" :class="input" placeholder="Full name" required />
+          <input v-model="editUser.email" :class="input" type="email" placeholder="Email" required />
+          <input
+            v-model="editUser.password"
+            :class="input"
+            class="sm:col-span-2"
+            type="password"
+            autocomplete="new-password"
+            placeholder="New password (leave blank to keep current)"
+            minlength="8"
+          />
+          <div class="flex gap-2 sm:col-span-2">
+            <button :class="btn" :disabled="busy" type="submit">
+              {{ busy ? 'Saving…' : 'Save changes' }}
+            </button>
+            <button :class="ghostBtn" :disabled="busy" type="button" @click="cancelEditingUser">
+              Cancel
+            </button>
+          </div>
+        </form>
 
         <!-- Store assignments -->
         <div

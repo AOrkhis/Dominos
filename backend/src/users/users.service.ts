@@ -140,13 +140,25 @@ export class UsersService implements OnApplicationBootstrap {
 
   async update(
     id: string,
-    body: { name?: string; role?: string; isActive?: boolean },
+    body: {
+      name?: string;
+      email?: string;
+      password?: string;
+      role?: string;
+      isActive?: boolean;
+    },
     caller: User,
   ): Promise<User> {
     const user = await this.findOne(id);
     const callerIsSuper = caller.role === UserRole.SUPER_ADMIN;
     if (user.role === UserRole.SUPER_ADMIN && !callerIsSuper)
       throw new ForbiddenException('Only a super admin can modify a super admin');
+    if (
+      caller.role === UserRole.ADMIN &&
+      user.role === UserRole.ADMIN &&
+      user.id !== caller.id
+    )
+      throw new ForbiddenException('Admins cannot modify another admin account');
     if (user.id === caller.id && (body.role !== undefined || body.isActive === false))
       throw new ForbiddenException('You cannot demote or deactivate yourself');
     if (caller.role === UserRole.SUPERVISOR) {
@@ -154,11 +166,27 @@ export class UsersService implements OnApplicationBootstrap {
         throw new ForbiddenException('Supervisors can only modify user accounts');
       if (body.role !== undefined)
         throw new ForbiddenException('Supervisors cannot change roles');
+      if (body.email !== undefined || body.password !== undefined)
+        throw new ForbiddenException('Supervisors cannot change email or password');
       const mine = await this.assignedStoreIds(caller.id);
       if (!user.assignments.some((a) => mine.includes(a.storeId)))
         throw new ForbiddenException('This user is not assigned to one of your stores');
     }
-    if (body.name !== undefined) user.name = body.name.trim();
+    if (body.name !== undefined) {
+      if (typeof body.name !== 'string' || !body.name.trim())
+        throw new BadRequestException('name cannot be empty');
+      user.name = body.name.trim();
+    }
+    if (body.email !== undefined) {
+      if (typeof body.email !== 'string' || !body.email.trim().includes('@'))
+        throw new BadRequestException('a valid email is required');
+      user.email = body.email.trim().toLowerCase();
+    }
+    if (body.password !== undefined) {
+      if (typeof body.password !== 'string' || body.password.length < 8)
+        throw new BadRequestException('password must be at least 8 characters');
+      user.passwordHash = await this.passwordHasher.hash(body.password);
+    }
     if (body.role !== undefined) {
       const role = body.role as UserRole;
       if (!ROLES.includes(role))
@@ -167,8 +195,19 @@ export class UsersService implements OnApplicationBootstrap {
         throw new ForbiddenException('Only a super admin can grant super admin');
       user.role = role;
     }
-    if (body.isActive !== undefined) user.isActive = body.isActive;
-    return this.users.save(user);
+    if (body.isActive !== undefined) {
+      if (typeof body.isActive !== 'boolean')
+        throw new BadRequestException('isActive must be a boolean');
+      user.isActive = body.isActive;
+    }
+    try {
+      await this.users.save(user);
+    } catch (e) {
+      if (e instanceof QueryFailedError && e.message.includes('Duplicate'))
+        throw new ConflictException('email is already registered');
+      throw e;
+    }
+    return this.findOne(id);
   }
 
   async remove(id: string, caller: User): Promise<void> {
@@ -177,6 +216,8 @@ export class UsersService implements OnApplicationBootstrap {
     const target = await this.findOne(id);
     if (target.role === UserRole.SUPER_ADMIN && caller.role !== UserRole.SUPER_ADMIN)
       throw new ForbiddenException('Only a super admin can delete a super admin');
+    if (caller.role === UserRole.ADMIN && target.role === UserRole.ADMIN)
+      throw new ForbiddenException('Admins cannot delete another admin account');
     if (caller.role === UserRole.SUPERVISOR) {
       if (target.role !== UserRole.USER)
         throw new ForbiddenException('Supervisors can only delete user accounts');
