@@ -199,6 +199,11 @@ const busy = ref(false)
 const showAddUser = ref(false)
 const search = ref('')
 const roleFilter = ref('all')
+const newStore = reactive({ id: '' as number | '', name: '', region: '' })
+const editStore = reactive({ name: '', region: '' })
+const editingStoreId = ref<number | null>(null)
+const storeBusy = ref(false)
+const showAddStore = ref(false)
 
 const filteredUsers = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -315,6 +320,63 @@ async function unassign(u: ApiUser, a: ApiAssignment) {
 
 const assignable = (u: ApiUser) =>
   stores.value.filter((s) => !u.assignments.some((a) => a.store.id === s.id))
+
+const sortedStores = computed(() => [...stores.value].sort((a, b) => a.id - b.id))
+
+async function createStore() {
+  if (newStore.id === '') return
+  storeBusy.value = true
+  error.value = ''
+  try {
+    const created = await apiPost<ApiStore>('/stores', {
+      id: Number(newStore.id),
+      name: newStore.name,
+      region: newStore.region,
+    })
+    stores.value.push(created)
+    Object.assign(newStore, { id: '', name: '', region: '' })
+    showAddStore.value = false
+    flash(`Store ${created.id} added`)
+  } catch (e) {
+    fail(e)
+  } finally {
+    storeBusy.value = false
+  }
+}
+
+function startEditingStore(target: ApiStore) {
+  Object.assign(editStore, { name: target.name, region: target.region })
+  editingStoreId.value = target.id
+}
+
+function cancelEditingStore() {
+  editingStoreId.value = null
+  Object.assign(editStore, { name: '', region: '' })
+}
+
+async function saveStore(target: ApiStore) {
+  storeBusy.value = true
+  error.value = ''
+  try {
+    const updated = await apiPatch<ApiStore>(`/stores/${target.id}`, {
+      name: editStore.name,
+      region: editStore.region,
+    })
+    Object.assign(target, updated)
+    for (const person of users.value) {
+      for (const assignment of person.assignments) {
+        if (assignment.store.id === target.id)
+          Object.assign(assignment.store, { name: updated.name, region: updated.region })
+      }
+    }
+    cancelEditingStore()
+    flash(`Store ${target.id} updated`)
+  } catch (e) {
+    fail(e)
+  } finally {
+    storeBusy.value = false
+  }
+}
 
 // ---------- requests ----------
 const reqFilter = ref<'all' | 'new' | 'in_progress' | 'done'>('all')
@@ -728,6 +790,83 @@ const confirmBtn = (key: string) =>
         </select>
         <button :class="btn" :disabled="busy" type="submit">{{ busy ? 'Adding…' : 'Add person' }}</button>
       </form>
+
+      <!-- Store directory -->
+      <section v-if="canManage" class="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="font-display text-lg font-bold text-slate-900">Store Directory</h3>
+            <p class="mt-1 text-xs text-slate-500">
+              Add stores or update their name and region. Store numbers cannot be changed.
+            </p>
+          </div>
+          <button :class="btn" @click="showAddStore = !showAddStore">
+            {{ showAddStore ? '− Close' : '+ Add store' }}
+          </button>
+        </div>
+
+        <form
+          v-if="showAddStore"
+          class="mt-4 grid gap-3 rounded-xl border border-brand-200 bg-white p-4 sm:grid-cols-3"
+          @submit.prevent="createStore"
+        >
+          <input
+            v-model.number="newStore.id"
+            :class="input"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="Store number"
+            required
+          />
+          <input v-model="newStore.name" :class="input" placeholder="Store name / city" required />
+          <input v-model="newStore.region" :class="input" placeholder="Region" required />
+          <div class="flex gap-2 sm:col-span-3">
+            <button :class="btn" :disabled="storeBusy" type="submit">
+              {{ storeBusy ? 'Adding…' : 'Add store' }}
+            </button>
+          </div>
+        </form>
+
+        <p v-if="!sortedStores.length" class="mt-4 rounded-xl bg-white p-4 text-sm text-slate-500">
+          No stores have been added yet.
+        </p>
+        <div v-else class="mt-4 space-y-2">
+          <div
+            v-for="store in sortedStores"
+            :key="store.id"
+            class="rounded-xl border border-slate-200 bg-white p-4"
+          >
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="font-display font-bold text-brand-800">#{{ store.id }}</span>
+              <span class="min-w-36 flex-1 font-semibold text-slate-800">{{ store.name }}</span>
+              <span class="text-sm text-slate-500">{{ store.region }}</span>
+              <button
+                :class="ghostBtn + ' !px-3 !py-1.5 text-xs'"
+                @click="editingStoreId === store.id ? cancelEditingStore() : startEditingStore(store)"
+              >
+                {{ editingStoreId === store.id ? 'Close edit' : 'Edit' }}
+              </button>
+            </div>
+            <form
+              v-if="editingStoreId === store.id"
+              class="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2"
+              @submit.prevent="saveStore(store)"
+            >
+              <input v-model="editStore.name" :class="input" placeholder="Store name / city" required />
+              <input v-model="editStore.region" :class="input" placeholder="Region" required />
+              <div class="flex gap-2 sm:col-span-2">
+                <button :class="btn" :disabled="storeBusy" type="submit">
+                  {{ storeBusy ? 'Saving…' : 'Save changes' }}
+                </button>
+                <button :class="ghostBtn" :disabled="storeBusy" type="button" @click="cancelEditingStore">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
 
       <!-- Users -->
       <div v-if="!filteredUsers.length" class="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">

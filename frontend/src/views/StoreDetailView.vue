@@ -2,12 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import { getStore, getStoreStats, getWeeklySeries } from '@/data/stores'
+import { getStoreStats, getWeeklySeries } from '@/data/stores'
 import { apiGet } from '@/lib/api'
 
 const route = useRoute()
 const storeId = computed(() => Number(route.params.id))
-const store = computed(() => getStore(storeId.value))
+const store = ref<{ id: number; city: string; region: string } | null>(null)
 const stats = computed(() => (store.value ? getStoreStats(storeId.value) : null))
 const accessChecked = ref(false)
 const hasAccess = ref(false)
@@ -17,9 +17,20 @@ watch(storeId, async (id) => {
   accessChecked.value = false
   hasAccess.value = false
   accessError.value = ''
+  store.value = null
   try {
-    const assignedStores = await apiGet<{ id: number }[]>('/stores/mine')
-    hasAccess.value = assignedStores.some((assigned) => assigned.id === id)
+    const assignedStores = await apiGet<{ id: number; name: string; region: string }[]>(
+      '/stores/mine',
+    )
+    const assignedStore = assignedStores.find((assigned) => assigned.id === id)
+    hasAccess.value = Boolean(assignedStore)
+    if (assignedStore) {
+      store.value = {
+        id: assignedStore.id,
+        city: assignedStore.name,
+        region: assignedStore.region,
+      }
+    }
   } catch (error) {
     accessError.value = error instanceof Error ? error.message : 'Unable to verify your store assignments.'
   } finally {

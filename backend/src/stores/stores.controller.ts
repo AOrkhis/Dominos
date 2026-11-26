@@ -1,5 +1,15 @@
-import { Controller, Get, Param, ParseIntPipe } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser, Public } from '@nestjs/authentication';
+import { ADMIN_ROLES, Roles, RolesGuard } from '../auth/roles.js';
 import { User } from '../users/user.entity.js';
 import { StoresService } from './stores.service.js';
 
@@ -23,5 +33,22 @@ export class StoresController {
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.stores.findOne(id);
+  }
+
+  @Post()
+  @UseGuards(RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  create(@Body() body: { id?: number; name?: string; region?: string }) {
+    return this.stores.create(body);
+  }
+
+  @Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { name?: string; region?: string },
+  ) {
+    return this.stores.update(id, body);
   }
 }
