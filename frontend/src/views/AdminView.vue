@@ -43,14 +43,15 @@ interface ApiContest {
 }
 
 // ---------- shared state ----------
-type Tab = 'people' | 'requests' | 'calendar' | 'materials' | 'contest'
+type Tab = 'people' | 'stores' | 'requests' | 'calendar' | 'materials' | 'contest'
 const tab = ref<Tab>('people')
 const isSupervisor = computed(() => user.value?.role === 'supervisor')
 const isViewer = computed(() => user.value?.role === 'user')
 const canManage = computed(() => ['admin', 'super_admin'].includes(user.value?.role ?? ''))
 const tabs = computed(() => {
   const all: { id: Tab; label: string; icon: string; badge?: number }[] = [
-    { id: 'people', label: 'People & Stores', icon: 'users' },
+    { id: 'people', label: 'People', icon: 'users' },
+    { id: 'stores', label: 'Stores', icon: 'store' },
     { id: 'requests', label: isViewer.value ? "My store's requests" : 'Requests', icon: 'inbox', badge: openCount.value },
     { id: 'calendar', label: 'Calendar', icon: 'calendar' },
     { id: 'materials', label: 'Materials', icon: 'box' },
@@ -58,7 +59,9 @@ const tabs = computed(() => {
   ]
   // Users only watch their store's requests; supervisors also manage people.
   if (isViewer.value) return all.filter((t) => t.id === 'requests')
-  return isSupervisor.value ? all.slice(0, 2) : all
+  if (isSupervisor.value)
+    return all.filter((t) => t.id === 'people' || t.id === 'requests')
+  return all
 })
 const activeTab = computed(() =>
   tabs.value.some((t) => t.id === tab.value) ? tab.value : tabs.value[0]!.id,
@@ -735,6 +738,7 @@ const confirmBtn = (key: string) =>
       >
         <svg v-if="t.icon === 'users'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <svg v-else-if="t.icon === 'inbox'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        <svg v-else-if="t.icon === 'store'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h18l-1.5-6h-15z"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></svg>
         <svg v-else-if="t.icon === 'calendar'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
         <svg v-else-if="t.icon === 'box'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
         <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 21h8m-4-4v4M7 4h10v5a5 5 0 0 1-10 0V4zm10 1h3a2 2 0 0 1-2 4h-1M7 5H4a2 2 0 0 0 2 4h1"/></svg>
@@ -790,83 +794,6 @@ const confirmBtn = (key: string) =>
         </select>
         <button :class="btn" :disabled="busy" type="submit">{{ busy ? 'Adding…' : 'Add person' }}</button>
       </form>
-
-      <!-- Store directory -->
-      <section v-if="canManage" class="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 class="font-display text-lg font-bold text-slate-900">Store Directory</h3>
-            <p class="mt-1 text-xs text-slate-500">
-              Add stores or update their name and region. Store numbers cannot be changed.
-            </p>
-          </div>
-          <button :class="btn" @click="showAddStore = !showAddStore">
-            {{ showAddStore ? '− Close' : '+ Add store' }}
-          </button>
-        </div>
-
-        <form
-          v-if="showAddStore"
-          class="mt-4 grid gap-3 rounded-xl border border-brand-200 bg-white p-4 sm:grid-cols-3"
-          @submit.prevent="createStore"
-        >
-          <input
-            v-model.number="newStore.id"
-            :class="input"
-            type="number"
-            min="1"
-            step="1"
-            placeholder="Store number"
-            required
-          />
-          <input v-model="newStore.name" :class="input" placeholder="Store name / city" required />
-          <input v-model="newStore.region" :class="input" placeholder="Region" required />
-          <div class="flex gap-2 sm:col-span-3">
-            <button :class="btn" :disabled="storeBusy" type="submit">
-              {{ storeBusy ? 'Adding…' : 'Add store' }}
-            </button>
-          </div>
-        </form>
-
-        <p v-if="!sortedStores.length" class="mt-4 rounded-xl bg-white p-4 text-sm text-slate-500">
-          No stores have been added yet.
-        </p>
-        <div v-else class="mt-4 space-y-2">
-          <div
-            v-for="store in sortedStores"
-            :key="store.id"
-            class="rounded-xl border border-slate-200 bg-white p-4"
-          >
-            <div class="flex flex-wrap items-center gap-3">
-              <span class="font-display font-bold text-brand-800">#{{ store.id }}</span>
-              <span class="min-w-36 flex-1 font-semibold text-slate-800">{{ store.name }}</span>
-              <span class="text-sm text-slate-500">{{ store.region }}</span>
-              <button
-                :class="ghostBtn + ' !px-3 !py-1.5 text-xs'"
-                @click="editingStoreId === store.id ? cancelEditingStore() : startEditingStore(store)"
-              >
-                {{ editingStoreId === store.id ? 'Close edit' : 'Edit' }}
-              </button>
-            </div>
-            <form
-              v-if="editingStoreId === store.id"
-              class="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2"
-              @submit.prevent="saveStore(store)"
-            >
-              <input v-model="editStore.name" :class="input" placeholder="Store name / city" required />
-              <input v-model="editStore.region" :class="input" placeholder="Region" required />
-              <div class="flex gap-2 sm:col-span-2">
-                <button :class="btn" :disabled="storeBusy" type="submit">
-                  {{ storeBusy ? 'Saving…' : 'Save changes' }}
-                </button>
-                <button :class="ghostBtn" :disabled="storeBusy" type="button" @click="cancelEditingStore">
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </section>
 
       <!-- Users -->
       <div v-if="!filteredUsers.length" class="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">
@@ -992,6 +919,86 @@ const confirmBtn = (key: string) =>
         <p v-else class="mt-4 border-t border-slate-100 pt-4 text-xs text-slate-400">
           {{ roleLabels[u.role] }}s see all stores — no assignment needed.
         </p>
+      </div>
+    </div>
+
+    <!-- ==================== STORES ==================== -->
+    <div v-else-if="activeTab === 'stores' && canManage" class="mt-8 space-y-5">
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p class="text-xs font-bold tracking-[0.3em] text-brand-600 uppercase">Locations</p>
+          <h2 class="font-display mt-2 text-2xl font-extrabold text-slate-900">Store Directory</h2>
+          <p class="mt-1 text-sm text-slate-500">
+            Add stores or update their name and region. Store numbers cannot be changed.
+          </p>
+        </div>
+        <button :class="btn" @click="showAddStore = !showAddStore">
+          {{ showAddStore ? '− Close' : '+ Add store' }}
+        </button>
+      </div>
+
+      <form
+        v-if="showAddStore"
+        class="grid gap-3 rounded-2xl border-2 border-brand-200 bg-brand-50/50 p-6 sm:grid-cols-3"
+        @submit.prevent="createStore"
+      >
+        <input
+          v-model.number="newStore.id"
+          :class="input"
+          type="number"
+          min="1"
+          step="1"
+          placeholder="Store number"
+          required
+        />
+        <input v-model="newStore.name" :class="input" placeholder="Store name / city" required />
+        <input v-model="newStore.region" :class="input" placeholder="Region" required />
+        <div class="flex gap-2 sm:col-span-3">
+          <button :class="btn" :disabled="storeBusy" type="submit">
+            {{ storeBusy ? 'Adding…' : 'Add store' }}
+          </button>
+        </div>
+      </form>
+
+      <p v-if="!sortedStores.length" class="rounded-2xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">
+        No stores have been added yet.
+      </p>
+      <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <article
+          v-for="store in sortedStores"
+          :key="store.id"
+          class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-xs font-bold tracking-wider text-slate-400 uppercase">Store #{{ store.id }}</p>
+              <h3 class="font-display mt-1 text-lg font-bold text-slate-900">{{ store.name }}</h3>
+              <p class="mt-1 text-sm text-slate-500">{{ store.region }}</p>
+            </div>
+            <button
+              :class="ghostBtn + ' !px-3 !py-1.5 text-xs'"
+              @click="editingStoreId === store.id ? cancelEditingStore() : startEditingStore(store)"
+            >
+              {{ editingStoreId === store.id ? 'Close' : 'Edit' }}
+            </button>
+          </div>
+          <form
+            v-if="editingStoreId === store.id"
+            class="mt-4 grid gap-3 border-t border-slate-100 pt-4"
+            @submit.prevent="saveStore(store)"
+          >
+            <input v-model="editStore.name" :class="input" placeholder="Store name / city" required />
+            <input v-model="editStore.region" :class="input" placeholder="Region" required />
+            <div class="flex gap-2">
+              <button :class="btn" :disabled="storeBusy" type="submit">
+                {{ storeBusy ? 'Saving…' : 'Save changes' }}
+              </button>
+              <button :class="ghostBtn" :disabled="storeBusy" type="button" @click="cancelEditingStore">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </article>
       </div>
     </div>
 
