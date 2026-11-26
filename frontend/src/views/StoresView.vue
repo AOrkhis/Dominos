@@ -2,26 +2,29 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import localStores, { getStoreStats, type Store } from '@/data/stores'
+import { getStoreStats, type Store } from '@/data/stores'
 import { apiGet } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 
 const { user } = useAuth()
-const stores = ref<Store[]>(localStores)
+const stores = ref<Store[]>([])
 const live = ref(false)
-// Supervisors and users only see their assigned stores; everyone else sees all.
+const loading = ref(true)
+const loadError = ref('')
+// The API returns all stores for admins and assigned stores for other roles.
 const scoped = computed(() => ['supervisor', 'user'].includes(user.value?.role ?? ''))
 
 onMounted(async () => {
   try {
     const api = await apiGet<{ id: number; name: string; region: string }[]>(
-      scoped.value ? '/stores/mine' : '/stores',
+      '/stores/mine',
     )
     stores.value = api.map((s) => ({ id: s.id, city: s.name, region: s.region }))
     live.value = true
-  } catch {
-    // Scoped roles never fall back to the full bundled list.
-    if (scoped.value) stores.value = []
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'Unable to load store assignments.'
+  } finally {
+    loading.value = false
   }
 })
 
@@ -95,7 +98,11 @@ const filtered = computed(() => {
     </div>
 
     <!-- Store grid -->
-    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <p v-if="loadError" class="mt-8 rounded-xl border border-accent-500/30 bg-accent-50 p-4 text-sm font-semibold text-accent-600">
+      Store reports could not be loaded: {{ loadError }}
+    </p>
+    <p v-else-if="loading" class="mt-8 text-center text-slate-500">Loading assigned stores…</p>
+    <div v-else class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       <RouterLink
         v-for="store in filtered"
         :key="store.id"
@@ -126,8 +133,8 @@ const filtered = computed(() => {
       </RouterLink>
     </div>
 
-    <p v-if="!filtered.length" class="mt-12 text-center text-slate-500">
-      No stores match « {{ query }} ».
+    <p v-if="!loading && !loadError && !filtered.length" class="mt-12 text-center text-slate-500">
+      {{ scoped && !query ? 'No stores are assigned to your account.' : `No stores match « ${query} ».` }}
     </p>
   </section>
 </template>

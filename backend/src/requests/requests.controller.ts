@@ -10,7 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { CurrentUser, Public } from '@nestjs/authentication';
+import { CurrentUser } from '@nestjs/authentication';
 import { ADMIN_ROLES, MANAGER_ROLES, Roles, RolesGuard } from '../auth/roles.js';
 import { User, UserRole } from '../users/user.entity.js';
 import { RequestsService, type RequestBody } from './requests.service.js';
@@ -19,11 +19,12 @@ import { RequestsService, type RequestBody } from './requests.service.js';
 export class RequestsController {
   constructor(private readonly requests: RequestsService) {}
 
-  /** Store staff submit requests — no account needed. */
-  @Public()
+  /** Store staff submit requests for stores they're assigned to. */
   @Post()
-  create(@Body() body: RequestBody) {
-    return this.requests.create(body);
+  @UseGuards(RolesGuard)
+  @Roles(...MANAGER_ROLES, UserRole.USER)
+  create(@Body() body: RequestBody, @CurrentUser() caller: User) {
+    return this.requests.create(body, caller);
   }
 
   /**

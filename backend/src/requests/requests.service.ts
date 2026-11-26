@@ -60,12 +60,19 @@ export class RequestsService {
     });
   }
 
-  async create(body: RequestBody): Promise<MarketingRequest> {
+  async create(body: RequestBody, caller: User): Promise<MarketingRequest> {
     if (!body.storeId) throw new BadRequestException('storeId is required');
     if (!Array.isArray(body.items) || body.items.length === 0)
       throw new BadRequestException('at least one item is required');
     const store = await this.stores.findOne({ where: { id: body.storeId } });
     if (!store) throw new BadRequestException(`Unknown store ${body.storeId}`);
+    if (caller.role === UserRole.SUPERVISOR || caller.role === UserRole.USER) {
+      const assigned = await this.assignments.count({
+        where: { userId: caller.id, storeId: store.id },
+      });
+      if (!assigned)
+        throw new ForbiddenException('You can only request materials for your assigned stores');
+    }
     return this.requests.save(
       this.requests.create({
         storeId: store.id,

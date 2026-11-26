@@ -1,33 +1,71 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import { getStore, getStoreStats, getWeeklySeries } from '@/data/stores'
+import { apiGet } from '@/lib/api'
 
 const route = useRoute()
-const storeId = Number(route.params.id)
-const store = getStore(storeId)
-const stats = store ? getStoreStats(storeId) : null
+const storeId = computed(() => Number(route.params.id))
+const store = computed(() => getStore(storeId.value))
+const stats = computed(() => (store.value ? getStoreStats(storeId.value) : null))
+const accessChecked = ref(false)
+const hasAccess = ref(false)
+const accessError = ref('')
 
-const series = computed(() => (store ? getWeeklySeries(storeId) : []))
+watch(storeId, async (id) => {
+  accessChecked.value = false
+  hasAccess.value = false
+  accessError.value = ''
+  try {
+    const assignedStores = await apiGet<{ id: number }[]>('/stores/mine')
+    hasAccess.value = assignedStores.some((assigned) => assigned.id === id)
+  } catch (error) {
+    accessError.value = error instanceof Error ? error.message : 'Unable to verify your store assignments.'
+  } finally {
+    accessChecked.value = true
+  }
+}, { immediate: true })
+
+const series = computed(() => (store.value ? getWeeklySeries(storeId.value) : []))
 const maxSale = computed(() => Math.max(...series.value, 1))
 
 const kpis = computed(() =>
-  stats
+  stats.value
     ? [
-        { label: 'Weekly sales', value: `$${stats.weeklySales.toLocaleString()}`, trend: stats.salesTrend, good: 'up' },
-        { label: 'Orders / week', value: stats.orders.toLocaleString(), trend: stats.ordersTrend, good: 'up' },
-        { label: 'Avg. ticket', value: `$${stats.avgTicket.toFixed(2)}`, trend: null, good: 'up' },
-        { label: 'Upsell rate', value: `${stats.upsellRate}%`, trend: null, good: 'up' },
-        { label: 'Google rating', value: `${stats.rating} / 5`, trend: null, good: 'up' },
-        { label: 'Upsell rank', value: `#${stats.rank} of 28`, trend: null, good: 'up' },
+        { label: 'Weekly sales', value: `$${stats.value.weeklySales.toLocaleString()}`, trend: stats.value.salesTrend, good: 'up' },
+        { label: 'Orders / week', value: stats.value.orders.toLocaleString(), trend: stats.value.ordersTrend, good: 'up' },
+        { label: 'Avg. ticket', value: `$${stats.value.avgTicket.toFixed(2)}`, trend: null, good: 'up' },
+        { label: 'Upsell rate', value: `${stats.value.upsellRate}%`, trend: null, good: 'up' },
+        { label: 'Google rating', value: `${stats.value.rating} / 5`, trend: null, good: 'up' },
+        { label: 'Upsell rank', value: `#${stats.value.rank} of 28`, trend: null, good: 'up' },
       ]
     : [],
 )
 </script>
 
 <template>
-  <template v-if="store && stats">
+  <section v-if="!accessChecked" class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-6">
+    <p class="text-slate-600">Verifying store access…</p>
+  </section>
+
+  <section v-else-if="accessError" class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-6">
+    <h1 class="font-display text-3xl font-extrabold text-slate-900">Report unavailable</h1>
+    <p class="mt-4 text-slate-600">We couldn't verify your store assignments: {{ accessError }}</p>
+    <RouterLink to="/stores" class="mt-8 inline-block font-semibold text-brand-600">
+      Back to Store Reports
+    </RouterLink>
+  </section>
+
+  <section v-else-if="!hasAccess" class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-6">
+    <h1 class="font-display text-3xl font-extrabold text-slate-900">Access restricted</h1>
+    <p class="mt-4 text-slate-600">This report is available only to staff assigned to store {{ storeId }}.</p>
+    <RouterLink to="/stores" class="mt-8 inline-block font-semibold text-brand-600">
+      Back to your Store Reports
+    </RouterLink>
+  </section>
+
+  <template v-else-if="store && stats">
     <PageHeader
       :eyebrow="`Store Report — ${store.region}`"
       :title="`Store ${store.id}`"

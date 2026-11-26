@@ -20,11 +20,13 @@ const router = createRouter({
       path: '/stores',
       name: 'stores',
       component: () => import('@/views/StoresView.vue'),
+      meta: { roles: ['admin', 'super_admin', 'supervisor', 'user'] },
     },
     {
       path: '/stores/:id(\\d+)',
       name: 'store-detail',
       component: () => import('@/views/StoreDetailView.vue'),
+      meta: { roles: ['admin', 'super_admin', 'supervisor', 'user'] },
     },
     {
       path: '/materials',
@@ -35,6 +37,7 @@ const router = createRouter({
       path: '/request',
       name: 'request',
       component: () => import('@/views/RequestView.vue'),
+      meta: { roles: ['admin', 'super_admin', 'supervisor', 'user'] },
     },
     {
       path: '/contest',

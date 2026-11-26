@@ -2,13 +2,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import localStores, { type Store } from '@/data/stores'
+import type { Store } from '@/data/stores'
 import { materialCategories } from '@/data/materials'
 import { apiGet, apiPost } from '@/lib/api'
 
 const route = useRoute()
 
-const stores = ref<Store[]>(localStores)
+const stores = ref<Store[]>([])
+const storeLoadError = ref('')
 
 // Fallback option groups if the API is unreachable.
 const options = ref([
@@ -44,11 +45,15 @@ interface ApiMaterial {
 
 onMounted(async () => {
   try {
-    const [apiStores, apiMaterials] = await Promise.all([
-      apiGet<{ id: number; name: string; region: string }[]>('/stores'),
-      apiGet<ApiMaterial[]>('/materials'),
-    ])
+    const apiStores = await apiGet<{ id: number; name: string; region: string }[]>('/stores/mine')
     stores.value = apiStores.map((s) => ({ id: s.id, city: s.name, region: s.region }))
+  } catch (error) {
+    stores.value = []
+    storeLoadError.value = error instanceof Error ? error.message : 'Unable to load assigned stores.'
+  }
+
+  try {
+    const apiMaterials = await apiGet<ApiMaterial[]>('/materials')
     options.value = materialCategories
       .map((cat) => ({
         group: cat.name,
@@ -56,7 +61,7 @@ onMounted(async () => {
       }))
       .filter((g) => g.items.length)
   } catch {
-    // API offline — bundled data stays
+    // Keep the bundled material options when the catalog API is unavailable.
   }
 })
 
@@ -175,6 +180,9 @@ const storeLabel = computed(() => {
   <!-- Form -->
   <section v-else class="mx-auto max-w-4xl px-4 py-12 sm:px-6">
     <form class="space-y-8" @submit.prevent="submit">
+      <div v-if="storeLoadError" class="rounded-xl border border-accent-500/30 bg-accent-50 p-4 text-sm font-semibold text-accent-600">
+        Your assigned stores could not be loaded: {{ storeLoadError }}
+      </div>
       <div v-if="errors.length" class="rounded-xl border border-accent-500/30 bg-accent-50 p-4">
         <p v-for="e in errors" :key="e" class="text-sm font-semibold text-accent-600">• {{ e }}</p>
       </div>
@@ -195,6 +203,9 @@ const storeLabel = computed(() => {
               {{ s.id }} — {{ s.city }}
             </option>
           </select>
+          <p v-if="!storeLoadError && !stores.length" class="mt-2 text-xs text-slate-500">
+            No stores are assigned to your account.
+          </p>
         </div>
         <div>
           <label for="contact" class="text-sm font-bold text-slate-800">Your name / email</label>
