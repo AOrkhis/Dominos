@@ -393,6 +393,51 @@ const steps = [
     </div>
   </section>
 
+  <!-- Upcoming calendar events -->
+  <section class="border-y border-slate-200 bg-slate-50">
+    <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6">
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p class="text-xs font-bold tracking-[0.3em] text-accent-500 uppercase">Plan Ahead</p>
+          <h2 class="font-display mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+            Upcoming Events
+          </h2>
+          <p class="mt-2 text-slate-600">The next three events on the marketing calendar.</p>
+        </div>
+        <RouterLink
+          to="/calendar"
+          class="inline-flex items-center gap-2 text-sm font-bold text-brand-600 transition hover:text-brand-800"
+        >
+          View full calendar
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M5 12h14m-6-6 6 6-6 6" />
+          </svg>
+        </RouterLink>
+      </div>
+
+      <p v-if="campaignsLoading" class="mt-8 text-slate-500">Loading upcoming events…</p>
+      <p v-else-if="campaignsError" class="mt-8 text-sm font-semibold text-accent-600">
+        Upcoming events are unavailable: {{ campaignsError }}
+      </p>
+      <div v-else-if="upcomingEvents.length" class="mt-8 grid gap-4 md:grid-cols-3">
+        <article
+          v-for="(event, index) in upcomingEvents.slice(0, 3)"
+          :key="`${event.title}-${event.startDate}`"
+          class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        >
+          <p class="text-xs font-bold tracking-wider text-brand-600 uppercase">
+            Event {{ index + 1 }}
+          </p>
+          <p class="mt-3 text-sm font-semibold text-slate-500">
+            {{ fmtContestDate(event.startDate) }} – {{ fmtContestDate(event.endDate) }}
+          </p>
+          <h3 class="font-display mt-2 text-lg font-bold text-slate-900">{{ event.title }}</h3>
+        </article>
+      </div>
+      <p v-else class="mt-8 text-slate-500">No upcoming events are scheduled.</p>
+    </div>
+  </section>
+
   <!-- Contest banner -->
   <section class="mx-auto max-w-7xl px-4 py-20 sm:px-6">
     <RouterLink
